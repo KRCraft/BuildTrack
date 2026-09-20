@@ -25,7 +25,22 @@ class CompanyDashboardView(APIView):
         financial = [project_financial_summary(project) for project in projects.select_related("budget__active_version")]
         pending_expenses = Expense.objects.filter(company=company, project__in=projects, status=Expense.Status.PENDING_APPROVAL)
         material_totals = {row["material_id"]: row["total"] for row in InventoryBalance.objects.filter(company=company).values("material_id").annotate(total=Coalesce(Sum("quantity_on_hand"), Decimal("0")))}
-        low_stock = sum(1 for material in Material.objects.filter(company=company, is_active=True) if material_totals.get(material.id, 0) <= material.minimum_stock_level)
+        low_stock_items = []
+        for material in Material.objects.filter(company=company, is_active=True):
+            raw_total = material_totals.get(material.id, Decimal("0"))
+            total = raw_total if isinstance(raw_total, Decimal) else Decimal(str(raw_total))
+            minimum = material.minimum_stock_level
+            if not isinstance(minimum, Decimal):
+                minimum = Decimal(str(minimum))
+            if total <= minimum:
+                low_stock_items.append({
+                    "id": str(material.id),
+                    "name": material.name,
+                    "code": material.code,
+                    "total": str(total),
+                    "minimum": str(minimum),
+                })
+        low_stock = len(low_stock_items)
         return Response({
             "company": {"id": str(company.id), "name": company.name, "currency_code": company.currency_code},
             "total_projects": projects.count(),
@@ -41,6 +56,7 @@ class CompanyDashboardView(APIView):
             "pending_expense_approvals": pending_expenses.count(),
             "total_materials": Material.objects.filter(company=company, is_active=True).count(),
             "low_stock_count": low_stock,
+            "low_stock_items": low_stock_items,
             "active_transfers": InventoryTransfer.objects.filter(company=company, status__in=[InventoryTransfer.Status.DISPATCHED, InventoryTransfer.Status.PARTIALLY_RECEIVED]).count(),
             "recent_stock_movements": MaterialTransaction.objects.filter(company=company).order_by("-occurred_at").values("id", "transaction_type", "quantity", "occurred_at")[:6],
         })

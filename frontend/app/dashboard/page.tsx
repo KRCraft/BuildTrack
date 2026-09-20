@@ -7,7 +7,7 @@ import { api, Project } from "@/lib/api";
 import { Card, Badge, Skeleton, Alert, EmptyState, PageHeader, Button } from "@/components/ui";
 import { useAuth } from "@/components/auth-provider";
 
-type Dashboard = { company: {name:string}; total_projects:number; active_projects:number; completed_projects:number; archived_projects:number; recent_projects:Project[]; recent_audit_actions:{id:string;action:string;created_at:string;actor_snapshot:{name?:string}}[] };
+type Dashboard = { company: {name:string}; total_projects:number; active_projects:number; completed_projects:number; archived_projects:number; recent_projects:Project[]; recent_audit_actions:{id:string;action:string;created_at:string;actor_snapshot:{name?:string}}[]; low_stock_count:number; low_stock_items:{id:string;name:string;code:string;total:string;minimum:string}[] };
 export default function DashboardPage() {
   const { loading, companies } = useAuth();
   const [data, setData] = useState<Dashboard | null>(null);
@@ -21,6 +21,19 @@ export default function DashboardPage() {
   const recentActions=data?.recent_audit_actions ?? [];
   return <Shell>
     <PageHeader eyebrow={data?.company.name} title="Good operational visibility." description="Your company’s project activity at a glance. Flexibly adapts to any screen." action={<Link href="/projects/new"><Button size="lg">New project</Button></Link>} />
+    {data?.low_stock_items && data.low_stock_items.length > 0 && (
+      <Alert variant="warning" className="mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="font-semibold">Low stock alert: {data.low_stock_count ?? data.low_stock_items.length} material(s) at or below minimum.</p>
+          <Link href="/inventory?low_stock=true" className="text-sm font-semibold underline hover:no-underline">View inventory</Link>
+        </div>
+        <ul className="mt-3 list-disc space-y-1 pl-5">
+          {data.low_stock_items.map((item) => (
+            <li key={item.id}>{item.name} ({item.code}) — {item.total} / {item.minimum}</li>
+          ))}
+        </ul>
+      </Alert>
+    )}
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{metrics.map(({label,value,icon:Icon})=><Card key={label} className="p-5" hover><Icon size={20} className="text-moss"/><p className="mt-5 text-3xl font-bold tabular-nums">{value}</p><p className="mt-1 text-sm text-[#65716a]">{label}</p></Card>)}</div>
     <div className="mt-7 grid gap-7 lg:grid-cols-[1.5fr_1fr]">
       <Card>

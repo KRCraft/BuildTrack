@@ -12,7 +12,7 @@ ALLOWED_HOSTS = [h.strip() for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "loca
 INSTALLED_APPS = [
     "django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes", "django.contrib.sessions",
     "django.contrib.messages", "django.contrib.staticfiles", "rest_framework", "rest_framework_simplejwt",
-    "rest_framework_simplejwt.token_blacklist", "corsheaders", "apps.common", "apps.accounts",
+    "rest_framework_simplejwt.token_blacklist", "corsheaders", "drf_spectacular", "apps.common", "apps.accounts",
     "apps.companies", "apps.projects", "apps.audit", "apps.budgets", "apps.expenses", "apps.inventory", "apps.workforce", "apps.reports", "apps.dashboard",
 ]
 MIDDLEWARE = [
@@ -100,8 +100,18 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
     "DEFAULT_THROTTLE_CLASSES": ("rest_framework.throttling.AnonRateThrottle", "rest_framework.throttling.UserRateThrottle"),
     "DEFAULT_THROTTLE_RATES": {"anon": "100/hour", "user": "1000/hour", "login": "5/minute", "register": "5/hour", "password_reset": "3/hour", "email_verification": "10/hour", "verify_email": "10/hour", "resend_verification": "5/hour"},
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 SIMPLE_JWT = {"ACCESS_TOKEN_LIFETIME": timedelta(minutes=15), "REFRESH_TOKEN_LIFETIME": timedelta(days=7), "ROTATE_REFRESH_TOKENS": True, "BLACKLIST_AFTER_ROTATION": True, "AUTH_HEADER_TYPES": ("Bearer",)}
 REFRESH_COOKIE_NAME = "buildtrack_refresh"
 REFRESH_COOKIE_SECURE = not DEBUG
 REFRESH_COOKIE_SAMESITE = "Lax"
+SPECTACULAR_SETTINGS = {
+    "TITLE": "BuildTrack API",
+    "DESCRIPTION": "Multi-tenant construction operations. Human contract: docs/API_CONTRACT.md. Machine contract: /api/schema/ (OpenAPI 3.0). Auth: Bearer + X-Company-ID + HttpOnly refresh.",
+    "VERSION": "1.1.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_REQUEST": True,
+    "SCHEMA_PATH_PREFIX": "/api/v1",
+    "SERVE_PERMISSIONS": ["rest_framework.permissions.AllowAny"],
+}

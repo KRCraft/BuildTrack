@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState, useCallback, useEffect } from "react";
 import { BarChart3, Building2, FolderKanban, LogOut, Menu, Package, ReceiptText, Settings, Truck, Users, X } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { getCompanyId, setCompanyId } from "@/lib/api";
 
 const nav = [
@@ -73,25 +74,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [mobileOpen]);
 
-  // Respect prefers-color-scheme for dark mode (Tailwind darkMode: "class")
-  useEffect(() => {
-    const mql = window.matchMedia("(prefers-color-scheme: dark)");
-    const apply = () => {
-      document.documentElement.classList.toggle("dark", mql.matches);
-    };
-    apply();
-    // Modern browsers support addEventListener on MediaQueryList
-    if (typeof mql.addEventListener === "function") {
-      mql.addEventListener("change", apply);
-      return () => mql.removeEventListener("change", apply);
-    } else {
-      // Safari fallback
-      const legacy = mql as unknown as { addListener: (cb: () => void) => void; removeListener: (cb: () => void) => void };
-      legacy.addListener(apply);
-      return () => legacy.removeListener(apply);
-    }
-  }, []);
-
   const handleCompanyChange = useCallback(async (value: string) => {
     setCompanyId(value);
     // No full reload - revalidate auth + soft refresh
@@ -131,7 +113,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       <aside
         id="sidebar"
         aria-label="Sidebar"
-        aria-expanded={!collapsed}
+        data-collapsed={collapsed}
         className={`hidden md:fixed md:inset-y-0 md:flex md:flex-col border-r border-[#e5e8e3] bg-white dark:border-[#1e2e28] dark:bg-[#141f1b] transition-all ${collapsed ? "md:w-[72px]" : "md:w-[252px]"}`}
       >
         <div className={`flex items-center gap-3 px-5 py-5 ${collapsed ? "justify-center" : ""}`}>
@@ -197,6 +179,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <button type="button" aria-label="Open navigation" aria-expanded={mobileOpen} aria-controls="sidebar" onClick={() => setMobileOpen(true)} className="grid h-9 w-9 place-items-center rounded-lg border border-[#e5e8e3] dark:border-[#2a3a33] md:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss/40"><Menu size={18} aria-hidden="true" /></button>
           <div className="hidden items-center gap-2 font-bold md:flex"><Building2 size={19} className="text-moss md:hidden" aria-hidden="true" /> <span className="md:hidden">BuildTrack</span></div>
           <div className="ml-auto flex items-center gap-3">
+            <ThemeToggle />
             <div className="text-right">
               <p className="text-sm font-semibold leading-none">{user ? `${user.first_name} ${user.last_name}`.trim() || user.email : ""}</p>
               <p className="text-xs text-[#78847d] dark:text-[#a1aea8]">{user?.email}</p>
