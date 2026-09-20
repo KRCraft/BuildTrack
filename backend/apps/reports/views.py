@@ -49,9 +49,9 @@ class RevisionCreate(APIView):
   if not can_manage_project(r,d.project):raise PermissionDenied("You cannot revise this report.")
   reason=r.data.get("revision_reason","")
   if not reason:raise ValidationError({"revision_reason":"A correction reason is required."})
-   source=d.approved_revision or d.revisions.order_by("-revision_number").first()
-   if not source:raise ValidationError("No source revision exists to create a new revision.")
-   num=(d.revisions.aggregate(v=Max("revision_number"))["v"] or 0)+1;new=DailyReportRevision.objects.create(company=d.company,daily_report=d,revision_number=num,work_completed=source.work_completed,progress_delta=source.progress_delta,worker_count=source.worker_count,issues=source.issues,weather_notes=source.weather_notes,revision_reason=reason)
+  source=d.approved_revision or d.revisions.order_by("-revision_number").first()
+  if not source:raise ValidationError("No source revision exists to create a new revision.")
+  num=(d.revisions.aggregate(v=Max("revision_number"))["v"] or 0)+1;new=DailyReportRevision.objects.create(company=d.company,daily_report=d,revision_number=num,work_completed=source.work_completed,progress_delta=source.progress_delta,worker_count=source.worker_count,issues=source.issues,weather_notes=source.weather_notes,revision_reason=reason)
   for u in source.material_usages.all():DailyReportMaterialUsage.objects.create(daily_report_revision=new,material=u.material,inventory_location=u.inventory_location,quantity_used=u.quantity_used)
   audit_event(r,d.company,"reports.revision_created",new,after_state=RevisionSerializer(new).data);return Response(RevisionSerializer(new).data,status=201)
 class RevisionDetail(APIView):
