@@ -1,15 +1,22 @@
 {
   "info": {
     "name": "BuildTrack API v1",
-    "description": "Startup MVP collection mirroring docs/API_CONTRACT.md. Base URL as variable `baseUrl` (default http://localhost:8000). Auth: Bearer JWT via `accessToken` variable.",
+    "description": "Live contract: Base URL `{{baseUrl}}/api/v1`, Auth Bearer JWT + X-Company-ID header (UUID). Refresh via HttpOnly cookie at /api/v1/auth/refresh/. See docs/API_CONTRACT.md v1.1 (2026-09-20).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     { "key": "baseUrl", "value": "http://localhost:8000", "type": "string" },
     { "key": "accessToken", "value": "", "type": "string" },
     { "key": "refreshToken", "value": "", "type": "string" },
-    { "key": "projectId", "value": "1", "type": "string" },
-    { "key": "quoteId", "value": "1", "type": "string" }
+    { "key": "companyId", "value": "", "type": "string", "description": "X-Company-ID UUID from GET /api/v1/companies/" },
+    { "key": "projectId", "value": "", "type": "string" },
+    { "key": "budgetVersionId", "value": "", "type": "string" },
+    { "key": "expenseId", "value": "", "type": "string" },
+    { "key": "materialId", "value": "", "type": "string" },
+    { "key": "locationId", "value": "", "type": "string" },
+    { "key": "transferId", "value": "", "type": "string" },
+    { "key": "reportId", "value": "", "type": "string" },
+    { "key": "revisionId", "value": "", "type": "string" }
   ],
   "auth": {
     "type": "bearer",
@@ -23,173 +30,242 @@
           "name": "register",
           "request": {
             "method": "POST",
-            "url": "{{baseUrl}}/api/auth/register/",
+            "url": "{{baseUrl}}/api/v1/auth/register/",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"client@example.com\",\n  \"password\": \"SecurePass123!\",\n  \"password_confirm\": \"SecurePass123!\",\n  \"full_name\": \"Amina Karimova\",\n  \"phone\": \"+998901234567\",\n  \"company\": \"Karimov Stroy\"\n}"
-            }
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"owner@example.com\",\n  \"first_name\": \"Amina\",\n  \"last_name\": \"Karimova\",\n  \"password\": \"SecurePass123!\"\n}" }
           }
         },
         {
           "name": "login",
           "request": {
             "method": "POST",
-            "url": "{{baseUrl}}/api/auth/login/",
+            "url": "{{baseUrl}}/api/v1/auth/login/",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"client@example.com\",\n  \"password\": \"SecurePass123!\"\n}"
-            }
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"owner@example.com\",\n  \"password\": \"SecurePass123!\"\n}" }
           }
         },
         {
-          "name": "refresh",
+          "name": "refresh (cookie)",
           "request": {
             "method": "POST",
-            "url": "{{baseUrl}}/api/auth/refresh/",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"refresh\": \"{{refreshToken}}\"\n}" }
+            "url": "{{baseUrl}}/api/v1/auth/refresh/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }]
           }
         },
         {
-          "name": "me (get profile)",
-          "request": { "method": "GET", "url": "{{baseUrl}}/api/auth/me/" }
+          "name": "me",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/auth/me/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] }
+        },
+        {
+          "name": "logout",
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/auth/logout/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] }
+        }
+      ]
+    },
+    {
+      "name": "companies",
+      "item": [
+        { "name": "list my companies", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/companies/" } },
+        {
+          "name": "create company",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/companies/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Karimov Stroy\",\n  \"slug\": \"karimov-stroy\",\n  \"currency_code\": \"UZS\"\n}" }
+          }
+        },
+        { "name": "get company", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/companies/{{companyId}}/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
+        {
+          "name": "invite member",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/companies/{{companyId}}/invitations/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-Company-ID", "value": "{{companyId}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"pm@example.com\",\n  \"role\": \"PROJECT_MANAGER\"\n}" }
+          }
+        },
+        {
+          "name": "accept invitation",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/companies/invitations/accept/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"token\": \"<invitation-token>\"\n}" }
+          }
         }
       ]
     },
     {
       "name": "projects",
       "item": [
-        { "name": "list published", "request": { "method": "GET", "url": "{{baseUrl}}/api/projects/?page=1&page_size=12" } },
-        { "name": "featured", "request": { "method": "GET", "url": "{{baseUrl}}/api/projects/featured/" } },
-        {
-          "name": "create (admin)",
-          "request": {
-            "method": "POST",
-            "url": "{{baseUrl}}/api/projects/",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"title\": \"Office Renovation — IT Park\",\n  \"description\": \"450 m² office fit-out.\",\n  \"client\": 1,\n  \"status\": \"planned\",\n  \"progress\": 0,\n  \"budget\": \"42000.00\",\n  \"currency\": \"USD\",\n  \"start_date\": \"2026-10-01\",\n  \"end_date\": \"2027-01-30\",\n  \"location\": \"Tashkent, IT Park\",\n  \"is_published\": true,\n  \"is_featured\": false\n}"
-            }
-          }
-        },
-        { "name": "retrieve", "request": { "method": "GET", "url": "{{baseUrl}}/api/projects/{{projectId}}/" } },
-        {
-          "name": "update progress (admin)",
-          "request": {
-            "method": "PATCH",
-            "url": "{{baseUrl}}/api/projects/{{projectId}}/",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"progress\": 70,\n  \"status\": \"in_progress\"\n}" }
-          }
-        }
-      ]
-    },
-    {
-      "name": "clients (admin)",
-      "item": [
-        { "name": "list", "request": { "method": "GET", "url": "{{baseUrl}}/api/clients/" } },
+        { "name": "list", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/projects/?page=1&search=&status=", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
         {
           "name": "create",
           "request": {
             "method": "POST",
-            "url": "{{baseUrl}}/api/clients/",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"full_name\": \"Amina Karimova\",\n  \"company\": \"Karimov Stroy\",\n  \"email\": \"client@example.com\",\n  \"phone\": \"+998901234567\",\n  \"address\": \"Tashkent, Amir Temur 15\"\n}"
-            }
+            "url": "{{baseUrl}}/api/v1/projects/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-Company-ID", "value": "{{companyId}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Tashkent Villa — Yunusabad\",\n  \"code\": \"BT-2026-001\",\n  \"client_name\": \"Karimov Stroy\",\n  \"status\": \"ACTIVE\",\n  \"budget_planned\": \"85000.00\",\n  \"currency_code\": \"UZS\",\n  \"start_date\": \"2026-06-01\",\n  \"end_date\": \"2026-12-15\",\n  \"location\": \"Tashkent, Yunusabad\"\n}" }
           }
         },
-        { "name": "retrieve", "request": { "method": "GET", "url": "{{baseUrl}}/api/clients/1/" } }
-      ]
-    },
-    {
-      "name": "quotes",
-      "item": [
+        { "name": "retrieve", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/projects/{{projectId}}/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
         {
-          "name": "submit (public)",
-          "request": {
-            "method": "POST",
-            "url": "{{baseUrl}}/api/quotes/",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"full_name\": \"Otabek Nazarov\",\n  \"email\": \"otabek@example.com\",\n  \"phone\": \"+998909876543\",\n  \"service_type\": \"renovation\",\n  \"budget_range\": \"10k_50k\",\n  \"message\": \"Need 120 m² apartment renovation in Sergeli.\",\n  \"preferred_contact\": \"telegram\"\n}"
-            }
-          }
-        },
-        { "name": "list (client/admin)", "request": { "method": "GET", "url": "{{baseUrl}}/api/quotes/?status=new" } },
-        { "name": "retrieve", "request": { "method": "GET", "url": "{{baseUrl}}/api/quotes/{{quoteId}}/" } },
-        {
-          "name": "set estimated (admin)",
+          "name": "update",
           "request": {
             "method": "PATCH",
-            "url": "{{baseUrl}}/api/quotes/{{quoteId}}/",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"status\": \"estimated\",\n  \"estimated_price\": \"18500.00\",\n  \"admin_notes\": \"Includes materials.\"\n}" }
+            "url": "{{baseUrl}}/api/v1/projects/{{projectId}}/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-Company-ID", "value": "{{companyId}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"ACTIVE\"\n}" }
           }
         },
+        { "name": "archive", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/projects/{{projectId}}/archive/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
+        { "name": "assignments list", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/projects/{{projectId}}/assignments/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
         {
-          "name": "accept + create project (admin)",
-          "request": { "method": "POST", "url": "{{baseUrl}}/api/quotes/{{quoteId}}/accept/?create_project=true" }
-        }
-      ]
-    },
-    {
-      "name": "contact",
-      "item": [
-        {
-          "name": "submit (public)",
+          "name": "assign member",
           "request": {
             "method": "POST",
-            "url": "{{baseUrl}}/api/contact/",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Dilnoza\",\n  \"email\": \"dilnoza@example.com\",\n  \"subject\": \"Partnership\",\n  \"message\": \"We supply cement. Interested in partnership?\"\n}"
-            }
-          }
-        },
-        { "name": "inbox (admin)", "request": { "method": "GET", "url": "{{baseUrl}}/api/contact/?is_read=false" } },
-        {
-          "name": "mark read (admin)",
-          "request": {
-            "method": "PATCH",
-            "url": "{{baseUrl}}/api/contact/1/",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"is_read\": true,\n  \"reply_note\": \"Replied via email.\"\n}" }
+            "url": "{{baseUrl}}/api/v1/projects/{{projectId}}/assignments/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-Company-ID", "value": "{{companyId}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"membership\": \"<membership-uuid>\",\n  \"assignment_role\": \"PROJECT_MANAGER\"\n}" }
           }
         }
       ]
     },
     {
-      "name": "testimonials",
+      "name": "budgets",
       "item": [
-        { "name": "list approved (public)", "request": { "method": "GET", "url": "{{baseUrl}}/api/testimonials/?page_size=6" } },
+        { "name": "get project budget", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/projects/{{projectId}}/budget/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
+        { "name": "create budget", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/projects/{{projectId}}/budget/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
+        { "name": "create revision", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/projects/{{projectId}}/budget/revisions/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
+        { "name": "get version", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/budget-versions/{{budgetVersionId}}/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
         {
-          "name": "submit (public)",
+          "name": "add category",
           "request": {
             "method": "POST",
-            "url": "{{baseUrl}}/api/testimonials/",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"client_name\": \"Jasur Aliyev\",\n  \"company\": \"Aliyev Group\",\n  \"rating\": 5,\n  \"text\": \"BuildTrack delivered two weeks early. Transparent tracking was excellent.\",\n  \"project\": 1\n}"
-            }
+            "url": "{{baseUrl}}/api/v1/budget-versions/{{budgetVersionId}}/categories/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-Company-ID", "value": "{{companyId}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Foundation\",\n  \"planned_amount\": \"25000.00\"\n}" }
           }
         },
+        { "name": "submit version", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/budget-versions/{{budgetVersionId}}/submit/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
+        { "name": "approve version", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/budget-versions/{{budgetVersionId}}/approve/", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-Company-ID", "value": "{{companyId}}" }], "body": { "mode": "raw", "raw": "{}" } } }
+      ]
+    },
+    {
+      "name": "expenses",
+      "item": [
+        { "name": "suppliers list", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/suppliers/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
         {
-          "name": "approve (admin)",
+          "name": "create supplier",
           "request": {
-            "method": "PATCH",
-            "url": "{{baseUrl}}/api/testimonials/1/",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"is_approved\": true,\n  \"is_featured\": true\n}" }
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/suppliers/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-Company-ID", "value": "{{companyId}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Cement LLC\",\n  \"tax_id\": \"123456789\",\n  \"phone\": \"+998901234567\"\n}" }
           }
-        }
+        },
+        { "name": "expenses list", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/expenses/?project_id={{projectId}}&page=1", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
+        {
+          "name": "create expense (idempotent)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/expenses/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-Company-ID", "value": "{{companyId}}" }, { "key": "Idempotency-Key", "value": "{{$guid}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"project\": \"{{projectId}}\",\n  \"budget_category\": \"<category-uuid>\",\n  \"supplier\": \"<supplier-uuid>\",\n  \"amount\": \"1200.00\",\n  \"currency_code\": \"UZS\",\n  \"expense_date\": \"2026-09-20\",\n  \"description\": \"Cement purchase\"\n}" }
+          }
+        },
+        { "name": "submit expense", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/expenses/{{expenseId}}/submit/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
+        { "name": "approve expense", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/expenses/{{expenseId}}/approve/", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-Company-ID", "value": "{{companyId}}" }], "body": { "mode": "raw", "raw": "{\n  \"comment\": \"Approved\"\n}" } } }
+      ]
+    },
+    {
+      "name": "inventory",
+      "item": [
+        { "name": "materials list", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/materials/?search=", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
+        {
+          "name": "create material",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/materials/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-Company-ID", "value": "{{companyId}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Cement M400\",\n  \"code\": \"CEM-001\",\n  \"unit\": \"kg\",\n  \"minimum_stock_level\": \"100.00\"\n}" }
+          }
+        },
+        { "name": "locations list", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/inventory/locations/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
+        {
+          "name": "receipt",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/inventory/receipt/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-Company-ID", "value": "{{companyId}}" }, { "key": "Idempotency-Key", "value": "{{$guid}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"material\": \"{{materialId}}\",\n  \"location\": \"{{locationId}}\",\n  \"quantity\": \"500.00\",\n  \"reason\": \"Initial stock\"\n}" }
+          }
+        },
+        { "name": "balances", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/inventory/balances/?project={{projectId}}&low_stock=false", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
+        { "name": "transactions", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/inventory/transactions/?page=1", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
+        {
+          "name": "create transfer",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/inventory/transfers/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-Company-ID", "value": "{{companyId}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"source_location\": \"{{locationId}}\",\n  \"destination_location\": \"<dest-uuid>\",\n  \"purpose\": \"SITE_TRANSFER\",\n  \"items\": [{ \"material\": \"{{materialId}}\", \"quantity_requested\": \"100.00\" }]\n}" }
+          }
+        },
+        { "name": "dispatch transfer", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/inventory/transfers/{{transferId}}/dispatch/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }, { "key": "Idempotency-Key", "value": "{{$guid}}" }] } },
+        { "name": "receive transfer", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/inventory/transfers/{{transferId}}/receive/", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-Company-ID", "value": "{{companyId}}" }], "body": { "mode": "raw", "raw": "{\n  \"items\": [{ \"id\": \"<item-uuid>\", \"quantity\": \"100.00\" }]\n}" } } }
+      ]
+    },
+    {
+      "name": "workforce",
+      "item": [
+        { "name": "workers list", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/workers/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
+        {
+          "name": "create worker",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/workers/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-Company-ID", "value": "{{companyId}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"full_name\": \"Jasur Aliyev\",\n  \"phone\": \"+998901111111\",\n  \"specialty\": \"Mason\"\n}" }
+          }
+        },
+        { "name": "project workers", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/projects/{{projectId}}/workers/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } }
+      ]
+    },
+    {
+      "name": "reports",
+      "item": [
+        { "name": "list reports", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/projects/{{projectId}}/reports/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
+        {
+          "name": "create report",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/projects/{{projectId}}/reports/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-Company-ID", "value": "{{companyId}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"report_date\": \"2026-09-20\",\n  \"work_completed\": \"Foundation poured\",\n  \"progress_delta\": \"5.00\",\n  \"worker_count\": 12\n}" }
+          }
+        },
+        { "name": "get report", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/reports/{{reportId}}/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
+        {
+          "name": "create revision",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/reports/{{reportId}}/revisions/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-Company-ID", "value": "{{companyId}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"revision_reason\": \"Corrected progress\"\n}" }
+          }
+        },
+        { "name": "submit revision", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/revisions/{{revisionId}}/submit/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
+        { "name": "approve revision", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/revisions/{{revisionId}}/approve/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } }
+      ]
+    },
+    {
+      "name": "dashboard & audit",
+      "item": [
+        { "name": "company dashboard", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/dashboard/company/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
+        { "name": "project dashboard", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/dashboard/projects/{{projectId}}/", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } },
+        { "name": "audit logs", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/audit-logs/?page=1", "header": [{ "key": "X-Company-ID", "value": "{{companyId}}" }] } }
       ]
     }
   ]

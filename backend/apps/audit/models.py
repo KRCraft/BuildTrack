@@ -1,5 +1,4 @@
 from django.conf import settings
-from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from apps.common.models import UUIDTimeStampedModel
 

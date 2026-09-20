@@ -1,518 +1,397 @@
-# BuildTrack — API Contract v1
+# BuildTrack — API Contract v1.1
 
-> Base URL (dev): `http://localhost:8000/api/`  
-> Base URL (prod): `https://api.buildtrack.example.com/api/`  
-> API version: `v1` (unversioned prefix `/api/` for MVP; version via `Accept: application/json` + future `/api/v1/` alias)  
-> Auth scheme: JWT Bearer (`Authorization: Bearer <access_token>`)  
-> Content type: `application/json` (except noted)  
-> Trailing slash: required by Django REST Framework (`/api/projects/` not `/api/projects`)  
-> Date format: ISO-8601 UTC (`2026-09-12T10:00:00Z`)
+> Base URL (dev): `http://localhost:8000/api/v1/`  
+> Base URL (prod): `https://api.buildtrack.example.com/api/v1/`  
+> Version: `v1` via path `/api/v1/` (live, all endpoints versioned)  
+> Auth: JWT Bearer `Authorization: Bearer <access>` + tenant header `X-Company-ID: <uuid>`  
+> Refresh: HttpOnly cookie `buildtrack_refresh` at `POST /api/v1/auth/refresh/` (SameSite=Lax, Secure in prod, `credentials:include`)  
+> Content type: `application/json` (except file uploads)  
+> Trailing slash: required (`/api/v1/projects/` not `/api/v1/projects`)  
+> Date: ISO-8601 `YYYY-MM-DD` for dates, UTC `2026-09-20T10:00:00Z` for timestamps  
+> Pagination: DRF PageNumberPagination `PAGE_SIZE=25` (max 100 via `page_size` if added)
 
-This contract is frontend-binding. Backend MUST NOT break field names without a minor version bump. Frontend types in `frontend/src/utils/apiTypes.js` mirror this file.
+This contract is frontend-binding (`frontend/lib/api.ts`, `frontend/src/utils/apiTypes.js` legacy). Breaking field names requires minor version bump. Live backend: `backend/config/urls.py` + `backend/apps/*/urls.py`.
 
 ---
 
 ## 1. Conventions
 
-### 1.1 Roles
+### 1.1 Roles (CompanyMembership.Role)
 
-| Role | How determined | Capabilities |
-|------|---------------|--------------|
-| `public` | no token | list published projects/testimonials, create quote/contact/testimonial, register/login |
-| `client` | `user.role == "client"` | + list own quotes, retrieve own projects, update profile |
-| `admin`/`staff` | `user.is_staff == true` or `role == "admin"` | full CRUD on all resources, status transitions, approvals |
+| Role | Capabilities |
+|------|--------------|
+| `OWNER` | Full company, approve budgets/expenses/reports, manage members/materials/locations, view audit logs |
+| `PROJECT_MANAGER` | Create/manage projects, create budgets/reports/expenses (if assigned), dispatch transfers |
+| `SITE_MANAGER` | Receive transfers, record usage, limited project scope |
+| `ACCOUNTANT` | View balances/transactions, approve expenses, view financials |
+| `VIEWER` | Read-only (assigned projects only) |
 
-### 1.2 Common envelope
+OWNER/ACCOUNTANT see all company projects; others only via `ProjectAssignment` (`company_projects()` helper).
 
-List responses (paginated, DRF default):
+### 1.2 Tenant header
+
+All domain endpoints require `X-Company-ID: <uuid>` where `uuid` is a `Company.id` the user is `ACTIVE` member of. Missing/inactive → `404` (via `request_company()`). Frontend sends via `frontend/lib/api.ts` `getCompanyId()` from `localStorage.buildtrack_company`.
+
+### 1.3 Common envelope
+
+Paginated list:
 
 ```json
 {
   "count": 42,
-  "next": "http://localhost:8000/api/projects/?page=2",
+  "next": "http://localhost:8000/api/v1/expenses/?page=2",
   "previous": null,
   "results": [ { "...": "..." } ]
 }
 ```
 
-Query params supported on all list endpoints:
+Not all lists are paginated yet — `projects, materials, locations, transfers, reports` currently return bare arrays (`200 [ ... ]`); `expenses, transactions, audit-logs` are paginated. Standardize to paginated in v1.2.
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `page` | int | 1 | page number |
-| `page_size` | int | 12 (max 100) | items per page |
-| `search` | string | — | full-text search (endpoint-specific fields) |
-| `ordering` | string | `-created_at` | e.g. `?ordering=budget` or `?ordering=-created_at` |
+Query params (endpoint-specific): `page`, `search`, `status`, `project`, `material`, `location`, `date_from`, `date_to`.
 
-### 1.3 Error envelope
+### 1.4 Error envelope
 
 ```json
 {
-  "detail": "Human readable message.",
+  "detail": "Human readable",
   "code": "not_found",
-  "errors": {
-    "email": ["This field is required."]
-  }
+  "errors": { "email": ["This field is required."] }
 }
 ```
 
-Status codes used: `200 OK`, `201 Created`, `204 No Content`, `400 Bad Request`, `401 Unauthorized`, `403 Forbidden`, `404 Not Found`, `409 Conflict`, `429 Too Many Requests`.
-
-### 1.4 Auth header
+### 1.5 Auth headers
 
 ```
-Authorization: Bearer eyJhbGciOi...
+Authorization: Bearer <access>   (15min)
+X-Company-ID: <company-uuid>
+Cookie: buildtrack_refresh=<refresh>  (7d, HttpOnly, Path=/api/v1/auth/)
 ```
 
-Access token lifetime: 60 min. Refresh lifetime: 7 days.
+Refresh flow: `401` → `POST /api/v1/auth/refresh/` with `credentials:include` → new `access` (and rotated `refresh` cookie if `ROTATE_REFRESH_TOKENS=True`).
+
+### 1.6 Rate limiting
+
+`REST_FRAMEWORK.DEFAULT_THROTTLE_RATES: anon 100/hour, user 1000/hour, login 10/minute`. Public `register/login` throttled; quote/contact legacy 5/hour **not yet implemented** (future via `DEFAULT_THROTTLE_RATES` `quotes`).
 
 ---
 
-## 2. Auth — `/api/auth/`
+## 2. Auth — `/api/v1/auth/`
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/api/auth/register/` | public | Register new client user |
-| POST | `/api/auth/login/` | public | Obtain JWT pair |
-| POST | `/api/auth/refresh/` | public (refresh token) | Refresh access token |
-| POST | `/api/auth/logout/` | authenticated | Blacklist refresh token (optional MVP) |
-| GET | `/api/auth/me/` | authenticated | Current user profile |
-| PATCH | `/api/auth/me/` | authenticated | Update profile (name, phone, company) |
-| POST | `/api/auth/password/change/` | authenticated | Change password |
+| POST | `/api/v1/auth/register/` | AllowAny | Register `{email, first_name, last_name, password}` → 201 + `{access, refresh}` + Set-Cookie |
+| POST | `/api/v1/auth/login/` | AllowAny | `{email, password}` → 200 `{access, refresh}` + Set-Cookie + `{user}` |
+| POST | `/api/v1/auth/refresh/` | cookie | Uses `buildtrack_refresh` cookie → 200 `{access}` + rotated cookie |
+| POST | `/api/v1/auth/logout/` | authenticated | Blacklist refresh, delete cookie |
+| GET | `/api/v1/auth/me/` | authenticated | Current user profile |
+| POST | `/api/v1/auth/password/reset/` | AllowAny | `{email}` → 200 (console email `uid, token`) |
+| POST | `/api/v1/auth/password/reset/confirm/` | AllowAny | `{uid, token, new_password}` → 200 |
 
-### POST `/api/auth/register/`
+### POST `/api/v1/auth/register/`
 
 Request:
 
 ```json
-{
-  "email": "client@example.com",
-  "password": "SecurePass123!",
-  "password_confirm": "SecurePass123!",
-  "full_name": "Amina Karimova",
-  "phone": "+998901234567",
-  "company": "Karimov Stroy"
-}
+{ "email": "owner@example.com", "first_name": "Amina", "last_name": "Karimova", "password": "SecurePass123!" }
 ```
-
-Validation: `email` unique, `password` min 8 chars, must match `password_confirm`.
 
 Response `201`:
 
 ```json
 {
-  "id": 7,
-  "email": "client@example.com",
-  "full_name": "Amina Karimova",
-  "phone": "+998901234567",
-  "company": "Karimov Stroy",
-  "role": "client",
-  "is_staff": false,
-  "created_at": "2026-09-12T10:00:00Z",
-  "tokens": {
-    "access": "<jwt>",
-    "refresh": "<jwt>"
-  }
+  "id": "uuid",
+  "email": "owner@example.com",
+  "first_name": "Amina",
+  "last_name": "Karimova",
+  "tokens": { "access": "<jwt>", "refresh": "<jwt>" }
 }
 ```
+
+Also `Set-Cookie: buildtrack_refresh=<refresh>; HttpOnly; Path=/api/v1/auth/; SameSite=Lax; Max-Age=604800`.
 
 Errors `400`: `{ "errors": { "email": ["User with this email already exists."] } }`
 
-### POST `/api/auth/login/`
+### POST `/api/v1/auth/login/`
 
-Request:
+Request `{ "email": "...", "password": "..." }` → `200 { "access": "...", "refresh": "...", "user": { "id", "email", "first_name", "last_name" } }` + Set-Cookie. `401` invalid.
 
-```json
-{ "email": "client@example.com", "password": "SecurePass123!" }
-```
+### POST `/api/v1/auth/refresh/`
 
-Response `200`:
-
-```json
-{
-  "access": "<jwt>",
-  "refresh": "<jwt>",
-  "user": {
-    "id": 7,
-    "email": "client@example.com",
-    "full_name": "Amina Karimova",
-    "role": "client",
-    "is_staff": false
-  }
-}
-```
-
-Error `401`: `{ "detail": "Invalid credentials.", "code": "auth_failed" }`
-
-### POST `/api/auth/refresh/`
-
-Request: `{ "refresh": "<jwt>" }` → Response `200`: `{ "access": "<new_jwt>" }`
-
-### GET `/api/auth/me/`
-
-Response `200`:
-
-```json
-{
-  "id": 7,
-  "email": "client@example.com",
-  "full_name": "Amina Karimova",
-  "phone": "+998901234567",
-  "company": "Karimov Stroy",
-  "role": "client",
-  "is_staff": false,
-  "created_at": "2026-09-12T10:00:00Z",
-  "updated_at": "2026-09-12T10:00:00Z"
-}
-```
-
-### PATCH `/api/auth/me/`
-
-Updatable: `full_name`, `phone`, `company`. Response `200` = updated user object.
-
-### POST `/api/auth/password/change/`
-
-Request: `{ "old_password": "...", "new_password": "...", "new_password_confirm": "..." }` → `200`: `{ "detail": "Password updated." }`
+No body (cookie). `200 { "access": "<new>" }` + `Set-Cookie` rotated. `401` if missing/invalid/blacklisted.
 
 ---
 
-## 3. Projects — `/api/projects/`
+## 3. Companies — `/api/v1/companies/`
 
-Public portfolio + client project tracking. Core BuildTrack resource.
+| Method | Endpoint | Auth | Role |
+|--------|----------|------|------|
+| GET | `/api/v1/companies/` | auth | any member — lists `is_active` companies where `status=ACTIVE` |
+| POST | `/api/v1/companies/` | auth | any — creates Company + OWNER Membership for caller |
+| GET | `/api/v1/companies/<uuid>/` | auth + X-Company-ID | member |
+| POST | `/api/v1/companies/<uuid>/invitations/` | auth + X-Company-ID | OWNER — `{email, role}` → creates invitation, revokes prior PENDING, sends email |
+| POST | `/api/v1/companies/invitations/accept/` | auth | any — `{token}` (raw secrets.token_urlsafe) → `update_or_create` Membership, `select_for_update` + expiry + email match |
 
-Project statuses: `planned` → `in_progress` → `on_hold` → `in_progress` → `completed` (+ `cancelled` terminal). Progress 0–100.
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/projects/` | public | List projects (public sees only `is_published=true`; admin sees all via `?all=true` or staff token) |
-| POST | `/api/projects/` | admin | Create project |
-| GET | `/api/projects/:id/` | public (published) / client-owner / admin | Retrieve detail incl. milestones |
-| PUT/PATCH | `/api/projects/:id/` | admin | Full/partial update (status, progress) |
-| DELETE | `/api/projects/:id/` | admin | Delete (or archive via `is_published=false` preferred) |
-| GET | `/api/projects/:id/milestones/` | auth per project visibility | List milestones (nested) |
-| GET | `/api/projects/featured/` | public | Featured projects (`is_featured=true`, published, max 6) |
-
-List filters: `?status=in_progress&client=3&is_featured=true&search=villa&ordering=-created_at`
-
-### Project object
+Company object:
 
 ```json
 {
-  "id": 12,
-  "title": "Tashkent Villa — Yunusabad",
-  "slug": "tashkent-villa-yunusabad",
-  "description": "240 m² two-storey villa, turnkey.",
-  "client": 4,
+  "id": "uuid",
+  "name": "Karimov Stroy",
+  "slug": "karimov-stroy",
+  "currency_code": "UZS",
+  "timezone": "Asia/Tashkent",
+  "is_active": true,
+  "created_at": "2026-09-20T10:00:00Z"
+}
+```
+
+Errors: `409` duplicate slug → `slug-2`, `403` non-OWNER invites OWNER (allowed in code — privilege note).
+
+---
+
+## 4. Projects — `/api/v1/projects/`
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/api/v1/projects/` | auth + X-Company-ID | List via `company_projects()`; filters `?status=&search=` (search `name|code|client_name` via `|` queryset — recommend `Q` + `distinct`) |
+| POST | `/api/v1/projects/` | auth + X-Company-ID | OWNER/PROJECT_MANAGER only |
+| GET | `/api/v1/projects/<uuid>/` | auth + X-Company-ID | via `project_or_404` (membership scoped) |
+| PATCH | `/api/v1/projects/<uuid>/` | auth + X-Company-ID | `can_manage_project` (OWNER or PM assignment) |
+| POST | `/api/v1/projects/<uuid>/archive/` | auth + X-Company-ID | `can_manage_project`, sets `status=ARCHIVED, is_archived=True` |
+| GET | `/api/v1/projects/<uuid>/assignments/` | auth + X-Company-ID | List assignments |
+| POST | `/api/v1/projects/<uuid>/assignments/` | auth + X-Company-ID | `can_manage_project`, validates `role` allowed (OWNER→any, PM→PM/VIEWER) |
+
+Project statuses: `DRAFT, ACTIVE, ON_HOLD, COMPLETED, ARCHIVED`. No `planned/in_progress` (legacy docs) — live is `DRAFT/ACTIVE`.
+
+Project object (serializer):
+
+```json
+{
+  "id": "uuid",
+  "company": "uuid",
+  "code": "BT-2026-001",
+  "name": "Tashkent Villa — Yunusabad",
   "client_name": "Karimov Stroy",
-  "status": "in_progress",
-  "status_display": "In Progress",
-  "progress": 65,
-  "budget": "85000.00",
-  "currency": "USD",
-  "start_date": "2026-06-01",
-  "end_date": "2026-12-15",
-  "location": "Tashkent, Yunusabad",
-  "cover_image": "http://localhost:8000/media/projects/covers/villa.jpg",
-  "gallery": ["http://localhost:8000/media/projects/gallery/1.jpg"],
-  "is_published": true,
-  "is_featured": true,
-  "tracking_code": "BT-2026-0012",
-  "created_at": "2026-06-01T08:00:00Z",
-  "updated_at": "2026-09-10T14:00:00Z",
-  "milestones": [
-    { "id": 1, "title": "Foundation", "is_completed": true, "due_date": "2026-07-01" }
-  ]
+  "status": "ACTIVE",
+  "progress_percent_cache": "0.00",
+  "budget_planned": "85000.00",
+  "is_archived": false,
+  "version": 1,
+  "created_at": "2026-09-20T10:00:00Z",
+  "updated_at": "2026-09-20T10:00:00Z"
 }
 ```
 
-Field rules:
-- `title`: required, max 200
-- `slug`: auto-generated, unique, read-only on create (editable by admin)
-- `status`: enum `planned|in_progress|on_hold|completed|cancelled`
-- `progress`: int 0–100
-- `budget`: decimal string, >= 0
-- `tracking_code`: read-only, format `BT-YYYY-NNNN`, used for public tracking lookup `?search=BT-2026-0012`
-- `cover_image`/`gallery`: multipart upload OR URL; on JSON create accept URL strings
-
-### POST `/api/projects/` (admin)
-
-Request (JSON):
-
-```json
-{
-  "title": "Office Renovation — IT Park",
-  "description": "450 m² office fit-out.",
-  "client": 4,
-  "status": "planned",
-  "progress": 0,
-  "budget": "42000.00",
-  "currency": "USD",
-  "start_date": "2026-10-01",
-  "end_date": "2027-01-30",
-  "location": "Tashkent, IT Park",
-  "is_published": true,
-  "is_featured": false
-}
-```
-
-Response `201`: full Project object. `403` for non-staff.
-
-### PATCH `/api/projects/:id/` (admin) — progress update
-
-```json
-{ "progress": 70, "status": "in_progress" }
-```
-
-Backend validates: cannot set `completed` unless `progress == 100` (or backend auto-sets 100). Frontend should enforce same.
+List is **not yet paginated** — returns `200 [ ... ]` (should be `{count, results}`).
 
 ---
 
-## 4. Clients — `/api/clients/`
-
-Admin-only CRM. Public never sees this endpoint (public client names come denormalized via `project.client_name`).
+## 5. Budgets — `/api/v1/projects/<uuid>/budget/` + `/api/v1/budget-versions/`
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| GET | `/api/clients/` | admin | List clients |
-| POST | `/api/clients/` | admin | Create client |
-| GET | `/api/clients/:id/` | admin | Retrieve + nested projects/quotes summary |
-| PUT/PATCH | `/api/clients/:id/` | admin | Update |
-| DELETE | `/api/clients/:id/` | admin | Delete (blocked `409` if projects exist) |
+| GET | `/api/v1/projects/<uuid>/budget/` | auth + X-Company-ID | `200 Budget` or `404` if none (fixed from `200 null`) |
+| POST | `/api/v1/projects/<uuid>/budget/` | auth + X-Company-ID | OWNER/PM — creates `Budget` + `BudgetVersion v1 DRAFT` → 201 |
+| POST | `/api/v1/projects/<uuid>/budget/revisions/` | auth + X-Company-ID | creates new `BudgetVersion` via `create_revision()` (copies `lineage_key`) |
+| GET | `/api/v1/budget-versions/<uuid>/` | auth + X-Company-ID | Retrieve |
+| PATCH | `/api/v1/budget-versions/<uuid>/` | auth + X-Company-ID | `editable` (DRAFT + `can_manage_project`), bumps `version` |
+| POST | `/api/v1/budget-versions/<uuid>/submit/` | auth + X-Company-ID | `refresh_total()`, `DRAFT→PENDING_APPROVAL` |
+| POST | `/api/v1/budget-versions/<uuid>/approve/` | auth + X-Company-ID | **OWNER only** (note: expenses allow OWNER/ACCOUNTANT, inconsistency) |
+| POST | `/api/v1/budget-versions/<uuid>/reject/` | auth + X-Company-ID | OWNER only, must be PENDING_APPROVAL |
+| POST | `/api/v1/budget-versions/<uuid>/categories/` | auth + X-Company-ID | Create `BudgetCategory` |
+| PATCH | `/api/v1/budget-categories/<uuid>/` | auth + X-Company-ID | Edit if version DRAFT |
+| DELETE | `/api/v1/budget-categories/<uuid>/` | auth + X-Company-ID | Block if `children.exists()` |
 
-Filters: `?search=karimov&ordering=-created_at`
-
-### Client object
-
-```json
-{
-  "id": 4,
-  "full_name": "Amina Karimova",
-  "company": "Karimov Stroy",
-  "email": "client@example.com",
-  "phone": "+998901234567",
-  "address": "Tashkent, Amir Temur 15",
-  "user": 7,
-  "notes": "Prefers Telegram contact.",
-  "projects_count": 2,
-  "active_quotes_count": 1,
-  "created_at": "2026-05-01T09:00:00Z",
-  "updated_at": "2026-09-01T09:00:00Z"
-}
-```
-
-- `user`: nullable FK → User (links login account to CRM record; one-to-one-ish)
-- `email`: unique if present
-- DELETE with existing projects → `409 { "detail": "Cannot delete client with existing projects." }`
+BudgetVersion statuses: `DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, SUPERSEDED`.
 
 ---
 
-## 5. Quotes / Quote Requests — `/api/quotes/`
-
-Lead capture + estimation pipeline. Highest startup value — keep friction low for public creation.
-
-Statuses: `new` → `contacted` → `estimated` → `accepted` | `declined` (+ `expired`).
+## 6. Expenses — `/api/v1/expenses/` + `/api/v1/suppliers/`
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| GET | `/api/quotes/` | client (own) / admin (all) | List. Client sees `?mine=true` implicit; admin may filter `?status=new` |
-| POST | `/api/quotes/` | public (rate-limited) | Submit quote request |
-| GET | `/api/quotes/:id/` | owner / admin | Retrieve |
-| PATCH | `/api/quotes/:id/` | owner (limited) / admin (full) | Owner may edit only while `status==new`; admin may transition status + set `estimated_price` |
-| DELETE | `/api/quotes/:id/` | admin | Delete spam |
-| POST | `/api/quotes/:id/accept/` | admin or owner | Mark accepted (creates Project optionally — see below) |
+| GET | `/api/v1/suppliers/` | auth + X-Company-ID | List |
+| POST | `/api/v1/suppliers/` | auth + X-Company-ID | OWNER/ACCOUNTANT only |
+| GET/PATCH | `/api/v1/suppliers/<uuid>/` | auth + X-Company-ID | OWNER/ACCOUNTANT patch |
+| GET | `/api/v1/expenses/?project_id=&status=&category=&supplier=&date_from=&date_to=&page=1` | auth + X-Company-ID | **Paginated** (`PageNumberPagination` 25) |
+| POST | `/api/v1/expenses/` | auth + X-Company-ID | `Idempotency-Key: <uuid>` header supported → 200 existing vs 201 new; validates `category.company==company`, `category.version==project.budget.active_version`, `currency==company.currency_code` |
+| GET/PATCH | `/api/v1/expenses/<uuid>/` | auth + X-Company-ID | PATCH only `DRAFT+STANDARD` + `may_create_expense()` |
+| POST | `/api/v1/expenses/<uuid>/submit/` | auth + X-Company-ID | `DRAFT→PENDING_APPROVAL` |
+| POST | `/api/v1/expenses/<uuid>/approve/` | auth + X-Company-ID | **OWNER/ACCOUNTANT** (diff from budgets OWNER-only) |
+| POST | `/api/v1/expenses/<uuid>/reject/` | auth + X-Company-ID | OWNER/ACCOUNTANT |
+| POST | `/api/v1/expenses/<uuid>/reverse/` | auth + X-Company-ID | Creates `REVERSAL` expense, `DRAFT`, same `correction_group_id` |
+| POST | `/api/v1/expenses/<uuid>/attachments/` | auth + X-Company-ID | `multipart/form-data` `file` (PDF/JPG/PNG 10MB) |
 
-Filters: `?status=new&service_type=construction&search=+99890`
-
-### POST `/api/quotes/` (public — no token required)
-
-Request:
-
-```json
-{
-  "full_name": "Otabek Nazarov",
-  "email": "otabek@example.com",
-  "phone": "+998909876543",
-  "service_type": "renovation",
-  "budget_range": "10k_50k",
-  "message": "Need 120 m² apartment renovation in Sergeli.",
-  "preferred_contact": "telegram",
-  "attachment_url": "https://.../floorplan.pdf"
-}
-```
-
-Enums:
-- `service_type`: `construction|renovation|design|consulting|other`
-- `budget_range`: `under_10k|10k_50k|50k_100k|over_100k|undecided`
-- `preferred_contact`: `phone|email|telegram|whatsapp`
-
-Response `201`:
+Expense object (key fields):
 
 ```json
 {
-  "id": 21,
-  "tracking_id": "Q-2026-0021",
-  "full_name": "Otabek Nazarov",
-  "email": "otabek@example.com",
-  "phone": "+998909876543",
-  "service_type": "renovation",
-  "budget_range": "10k_50k",
-  "message": "Need 120 m² apartment renovation in Sergeli.",
-  "preferred_contact": "telegram",
-  "status": "new",
-  "estimated_price": null,
-  "admin_notes": null,
-  "created_at": "2026-09-12T10:00:00Z"
+  "id": "uuid",
+  "project": "uuid",
+  "budget_category": "uuid",
+  "supplier": "uuid",
+  "amount": "1200.00",
+  "currency_code": "UZS",
+  "expense_date": "2026-09-20",
+  "status": "DRAFT",
+  "expense_type": "STANDARD",
+  "idempotency_key": "uuid",
+  "correction_group_id": "uuid",
+  "version": 1
 }
 ```
 
-Rate limit: 5/hour per IP → `429 { "detail": "Too many quote requests. Try again later." }`. Honeypot/spam check optional.
-
-### PATCH `/api/quotes/:id/` (admin status transition)
-
-```json
-{ "status": "estimated", "estimated_price": "18500.00", "admin_notes": "Includes materials." }
-```
-
-Allowed transitions enforced (invalid → `400 { "errors": { "status": ["Cannot transition from accepted to new."] } }`).
-
-### POST `/api/quotes/:id/accept/` (admin)
-
-Optional `?create_project=true` → backend creates linked `Project` (`status=planned`) and returns:
-
-```json
-{ "quote": { "...": "...", "status": "accepted" }, "project_id": 13 }
-```
+Filters: `project_id` (FK id, fixed from `project` string bug), `status`, `category` (=`budget_category`), `supplier`.
 
 ---
 
-## 6. Contact Messages — `/api/contact/`
-
-Simple inbound mailbox.
+## 7. Inventory — `/api/v1/materials/` + `/api/v1/inventory/`
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/api/contact/` | public | Submit message |
-| GET | `/api/contact/` | admin | List (filter `?is_read=false`) |
-| GET | `/api/contact/:id/` | admin | Retrieve |
-| PATCH | `/api/contact/:id/` | admin | Mark read / add reply note |
-| DELETE | `/api/contact/:id/` | admin | Delete |
+| GET | `/api/v1/materials/?search=&category=` | auth + X-Company-ID | List materials (bare array, not paginated) |
+| POST | `/api/v1/materials/` | auth + X-Company-ID | OWNER only |
+| GET/PATCH | `/api/v1/materials/<uuid>/` | auth + X-Company-ID | OWNER patch |
+| GET | `/api/v1/inventory/locations/` | auth + X-Company-ID | `project__in=company_projects` OR `project=None` |
+| POST | `/api/v1/inventory/locations/` | auth + X-Company-ID | OWNER only |
+| GET/PATCH | `/api/v1/inventory/locations/<uuid>/` | auth + X-Company-ID | `location_or_404` + project check |
+| GET | `/api/v1/inventory/balances/?project=&material=&location=&low_stock=` | auth + X-Company-ID | Returns `[{id, material, location, quantity_on_hand, minimum_stock_level, low_stock: bool}]` (`low_stock` bool fixed from string, total computed via `mat_totals`) |
+| GET | `/api/v1/inventory/transactions/?material=&location=&project=&transaction_type=&date_from=&date_to=&page=1` | auth + X-Company-ID | **Paginated** 25, OWNER/ACCOUNTANT see all, others filtered `project__in=company_projects` |
+| POST | `/api/v1/inventory/receipt/` | auth + X-Company-ID | `Idempotency-Key`, `inventory_operator` check (OWNER or PM/SITE_MANAGER assigned) → `record_transaction RECEIVE` |
+| GET | `/api/v1/inventory/transfers/` | auth + X-Company-ID | List |
+| POST | `/api/v1/inventory/transfers/` | auth + X-Company-ID | `source/destination` + `items` (material, quantity_requested) |
+| GET/PATCH | `/api/v1/inventory/transfers/<uuid>/` | auth + X-Company-ID | `transfer_or_404` + operator check |
+| POST | `/api/v1/inventory/transfers/<uuid>/dispatch/` | auth + X-Company-ID | `Idempotency-Key`, `DRAFT→DISPATCHED`, `record_transaction TRANSFER_OUT` per item |
+| POST | `/api/v1/inventory/transfers/<uuid>/receive/` | auth + X-Company-ID | `items: [{id, quantity}]`, `DISPATCHED|PARTIALLY→RECEIVED`, `TRANSFER_IN` |
+| POST | `/api/v1/inventory/transfers/<uuid>/cancel/` | auth + X-Company-ID | `DRAFT→CANCELLED` |
+| POST | `/api/v1/inventory/usage/` | auth + X-Company-ID | `project, location (must be PROJECT_SITE of that project), material, quantity` → `USE` |
+| POST | `/api/v1/inventory/adjustment/` | auth + X-Company-ID | **OWNER only**, `direction IN/OUT` → `ADJUSTMENT_IN/OUT` |
+| POST | `/api/v1/inventory/transactions/<uuid>/reverse/` | auth + X-Company-ID | **OWNER only**, `MaterialTransaction.objects.filter(reversal_of=original).exists()` check (fixed from `hasattr`) |
 
-### POST `/api/contact/`
-
-Request:
-
-```json
-{ "name": "Dilnoza", "email": "dilnoza@example.com", "phone": "+998901111111", "subject": "Partnership", "message": "We supply cement. Interested in partnership?" }
-```
-
-Response `201`:
-
-```json
-{ "id": 9, "name": "Dilnoza", "email": "dilnoza@example.com", "subject": "Partnership", "message": "...", "is_read": false, "created_at": "2026-09-12T10:00:00Z" }
-```
-
-### PATCH `/api/contact/:id/` (admin)
-
-```json
-{ "is_read": true, "reply_note": "Replied via email 12.09." }
-```
+All inventory mutating endpoints support `Idempotency-Key: <uuid>` where noted.
 
 ---
 
-## 7. Testimonials — `/api/testimonials/`
-
-Social proof. Public reads approved only; submission open; approval gated.
+## 8. Workforce — `/api/v1/workers/` + `/api/v1/projects/<uuid>/workers/`
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| GET | `/api/testimonials/` | public | List **approved only** (`is_approved=true`) |
-| POST | `/api/testimonials/` | public/authenticated | Submit testimonial (authenticated pre-fills name; sets `is_approved=false`) |
-| GET | `/api/testimonials/:id/` | public (approved) / admin (any) | Retrieve |
-| PATCH | `/api/testimonials/:id/` | admin | Approve/edit/feature |
-| DELETE | `/api/testimonials/:id/` | admin | Delete |
-| GET | `/api/testimonials/pending/` | admin | Shortcut list `is_approved=false` (or `?is_approved=false`) |
+| GET | `/api/v1/workers/` | auth + X-Company-ID | List |
+| POST | `/api/v1/workers/` | auth + X-Company-ID | OWNER/PROJECT_MANAGER |
+| GET/PATCH | `/api/v1/workers/<uuid>/` | auth + X-Company-ID | OWNER/PM |
+| POST | `/api/v1/projects/<uuid>/workers/` | auth + X-Company-ID | Assign worker (checks `status==ACTIVE`, same company) |
+| GET | `/api/v1/projects/<uuid>/workers/` | auth + X-Company-ID | List project workers |
 
-### Testimonial object
+---
 
-```json
-{
-  "id": 5,
-  "client_name": "Jasur Aliyev",
-  "company": "Aliyev Group",
-  "project": 12,
-  "project_title": "Tashkent Villa — Yunusabad",
-  "rating": 5,
-  "text": "BuildTrack delivered two weeks early. Transparent tracking was excellent.",
-  "avatar": "http://localhost:8000/media/testimonials/avatars/jasur.jpg",
-  "is_approved": true,
-  "is_featured": true,
-  "created_at": "2026-08-20T12:00:00Z"
-}
+## 9. Reports — `/api/v1/projects/<uuid>/reports/` + `/api/v1/reports/`
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/api/v1/projects/<uuid>/reports/` | auth + X-Company-ID | List |
+| POST | `/api/v1/projects/<uuid>/reports/` | auth + X-Company-ID | `can_manage_project`, validates `report_date` required ISO `YYYY-MM-DD`, `report_date` unique per project → 201 `Report` + `Revision v1 DRAFT` |
+| GET | `/api/v1/reports/<uuid>/` | auth + X-Company-ID | Retrieve |
+| POST | `/api/v1/reports/<uuid>/revisions/` | auth + X-Company-ID | `can_manage_project`, requires `revision_reason`, copies source (`approved_revision` or latest) → fails if no source |
+| GET | `/api/v1/revisions/<uuid>/` | auth + X-Company-ID | Retrieve |
+| PATCH | `/api/v1/revisions/<uuid>/` | auth + X-Company-ID | `editable` (DRAFT + `can_manage_project`), validates negative `progress_delta` requires OWNER/PM + reason |
+| POST | `/api/v1/revisions/<uuid>/submit/` | auth + X-Company-ID | `DRAFT→SUBMITTED` |
+| POST | `/api/v1/revisions/<uuid>/approve/` | auth + X-Company-ID | **OWNER/PROJECT_MANAGER** + `can_manage_project`, validates `0≤new_progress≤100`, handles superseded material usages via `ADJUSTMENT_IN` reversal then new `USE` |
+| POST | `/api/v1/revisions/<uuid>/reject/` | auth + X-Company-ID | OWNER/PM |
+| POST | `/api/v1/revisions/<uuid>/material-usages/` | auth + X-Company-ID | `editable`, validates material+location belong to company + project site |
+| PATCH/DELETE | `/api/v1/material-usages/<uuid>/` | auth + X-Company-ID | `editable` |
+
+---
+
+## 10. Dashboard & Audit
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/api/v1/dashboard/company/` | auth + X-Company-ID | `low_stock` (bool), `recent_stock_movements` (6), financial summary |
+| GET | `/api/v1/dashboard/projects/<uuid>/` | auth + X-Company-ID | `financial_summary` + `category_rows` + `project_usage` |
+| GET | `/api/v1/audit-logs/?page=1` | auth + X-Company-ID | **Paginated** 25, **OWNER only**, immutable |
+
+AuditLog records `company, actor, actor_snapshot, action, entity_type, entity_id, before_state, after_state, request_id, ip_address, user_agent`.
+
+---
+
+## 11. Frontend integration notes
+
+1. Base: `const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"`; `fetch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}`, "X-Company-ID": companyId }, credentials: "include" })`; auto-refresh on 401 via `fetch(`${API_URL}/auth/refresh/`)`.
+2. Company switcher: `localStorage.buildtrack_company` + `<select>` in `components/shell.tsx`.
+3. Postman: import `postman/BuildTrack.postman_collection.json`, set `baseUrl`, `accessToken`, `companyId` variables.
+4. Media: `multipart/form-data` for attachments; backend `FileField` stores in `MEDIA_ROOT` `backend/media/` (DEBUG serves via `static()`).
+5. Types: `frontend/src/utils/apiTypes.js` is legacy — prefer `frontend/lib/api.ts` generics.
+
+---
+
+## 12. Future (out of v1.1 scope)
+
+- Pagination for `projects/materials/locations/transfers/reports` (currently bare arrays)
+- Search via `Q` objects + `distinct` for projects/materials (currently `|` queryset union)
+- Full `ArrayField` removal from `audit/models.py` (unused import)
+- Redis `CACHES` wiring (compose has redis but no Django `CACHES`)
+- Replace `FileField` with S3, add virus scan
+- Approval hierarchy unification (budgets OWNER-only vs expenses OWNER/ACCOUNTANT vs reports OWNER/PM)
+
+---
+
+## Appendix A — Method matrix (live)
+
 ```
+POST   /api/v1/auth/register/                      AllowAny
+POST   /api/v1/auth/login/                         AllowAny
+POST   /api/v1/auth/refresh/                       cookie
+POST   /api/v1/auth/logout/                        auth
+GET    /api/v1/auth/me/                            auth
+POST   /api/v1/auth/password/reset/                AllowAny
+POST   /api/v1/auth/password/reset/confirm/        AllowAny
 
-- `rating`: int 1–5, required
-- `text`: required, min 20 chars, max 1000
-- `project`: nullable FK (link to showcase real work)
-- POST public request: `{ "client_name": "...", "company": "...", "rating": 5, "text": "...", "project": 12 }` → `201` with `is_approved: false` + `{ "detail": "Thanks! Your testimonial is under review." }` (detail in wrapper or second field — frontend: show thanks state)
-- Admin approve: `PATCH { "is_approved": true, "is_featured": true }`
+GET    /api/v1/companies/                          auth
+POST   /api/v1/companies/                          auth
+GET    /api/v1/companies/<uuid>/                   auth + X-Company-ID
+POST   /api/v1/companies/<uuid>/invitations/       auth + X-Company-ID (OWNER)
+POST   /api/v1/companies/invitations/accept/       auth
 
----
+GET    /api/v1/projects/                           auth + X-Company-ID
+POST   /api/v1/projects/                           auth + X-Company-ID (OWNER/PM)
+GET    /api/v1/projects/<uuid>/                    auth + X-Company-ID
+PATCH  /api/v1/projects/<uuid>/                    auth + X-Company-ID (can_manage)
+POST   /api/v1/projects/<uuid>/archive/            auth + X-Company-ID
+GET    /api/v1/projects/<uuid>/assignments/        auth + X-Company-ID
+POST   /api/v1/projects/<uuid>/assignments/        auth + X-Company-ID
 
-## 8. Frontend integration notes
+GET    /api/v1/projects/<uuid>/budget/             auth + X-Company-ID
+POST   /api/v1/projects/<uuid>/budget/             auth + X-Company-ID
+POST   /api/v1/projects/<uuid>/budget/revisions/   auth + X-Company-ID
+GET    /api/v1/budget-versions/<uuid>/             auth + X-Company-ID
+PATCH  /api/v1/budget-versions/<uuid>/             auth + X-Company-ID (DRAFT)
+POST   /api/v1/budget-versions/<uuid>/submit/      auth + X-Company-ID
+POST   /api/v1/budget-versions/<uuid>/approve/     auth + X-Company-ID (OWNER)
+POST   /api/v1/budget-versions/<uuid>/reject/      auth + X-Company-ID (OWNER)
 
-1. **Axios base**: `const api = axios.create({ baseURL: "/api/", headers: {...} })`; attach Bearer via interceptor; refresh on 401 once then retry.
-2. **Public quote form** posts to `/api/quotes/` with no token — handle `429` with friendly cooldown message.
-3. **Project tracking page**: `GET /api/projects/?search=<tracking_code>` — single-result UX; if `count==1` auto-open detail.
-4. **Testimonials carousel**: `GET /api/testimonials/?page_size=6&ordering=-created_at` (backend already filters approved for anonymous).
-5. **Admin tables**: pass staff token; filter `?status=` + `?search=`; use `PATCH` for inline status edits.
-6. **Media**: prefer `FormData` for `cover_image` upload: `Content-Type: multipart/form-data`; backend also accepts URL strings.
-7. **All mutation helpers** live in `frontend/src/utils/api.js`; **types** in `frontend/src/utils/apiTypes.js` (this contract's mirror).
+GET    /api/v1/suppliers/                          auth + X-Company-ID
+POST   /api/v1/suppliers/                          auth + X-Company-ID (OWNER/ACC)
+GET    /api/v1/expenses/                           auth + X-Company-ID (paginated)
+POST   /api/v1/expenses/                           auth + X-Company-ID (Idempotency-Key)
+POST   /api/v1/expenses/<uuid>/submit|approve|reject|reverse   auth + X-Company-ID
+POST   /api/v1/expenses/<uuid>/attachments/        auth + X-Company-ID
 
----
+GET    /api/v1/materials/                          auth + X-Company-ID
+POST   /api/v1/materials/                          auth + X-Company-ID (OWNER)
+GET    /api/v1/inventory/locations/                auth + X-Company-ID
+GET    /api/v1/inventory/balances/                 auth + X-Company-ID
+GET    /api/v1/inventory/transactions/             auth + X-Company-ID (paginated)
+POST   /api/v1/inventory/receipt|transfers|usage|adjustment   auth + X-Company-ID
 
-## 9. Future (out of MVP scope, do not implement yet)
+GET    /api/v1/workers/                            auth + X-Company-ID
+POST   /api/v1/workers/                            auth + X-Company-ID (OWNER/PM)
 
-- `/api/projects/:id/updates/` (timeline posts), `/api/notifications/`, `/api/payments/`
-- WebSocket project progress push
-- `POST /api/quotes/:id/attachments/` multi-file upload
+GET    /api/v1/projects/<uuid>/reports/            auth + X-Company-ID
+POST   /api/v1/projects/<uuid>/reports/            auth + X-Company-ID
+POST   /api/v1/reports/<uuid>/revisions/           auth + X-Company-ID
+POST   /api/v1/revisions/<uuid>/submit|approve|reject  auth + X-Company-ID
 
----
-
-## Appendix A — Quick method matrix
-
-```
-POST   /api/auth/register/          public
-POST   /api/auth/login/             public
-POST   /api/auth/refresh/           public
-GET    /api/auth/me/                auth
-PATCH  /api/auth/me/                auth
-
-GET    /api/projects/               public (published)
-POST   /api/projects/               admin
-GET    /api/projects/:id/           public/admin
-PATCH  /api/projects/:id/           admin
-DELETE /api/projects/:id/           admin
-
-GET    /api/clients/                admin
-POST   /api/clients/                admin
-GET    /api/clients/:id/            admin
-PATCH  /api/clients/:id/            admin
-DELETE /api/clients/:id/            admin
-
-GET    /api/quotes/                 client/admin
-POST   /api/quotes/                 public
-GET    /api/quotes/:id/             owner/admin
-PATCH  /api/quotes/:id/             owner(limited)/admin
-DELETE /api/quotes/:id/             admin
-
-POST   /api/contact/                public
-GET    /api/contact/                admin
-GET    /api/contact/:id/            admin
-PATCH  /api/contact/:id/            admin
-
-GET    /api/testimonials/           public (approved)
-POST   /api/testimonials/           public
-GET    /api/testimonials/:id/       public/admin
-PATCH  /api/testimonials/:id/       admin
-DELETE /api/testimonials/:id/       admin
+GET    /api/v1/dashboard/company/                  auth + X-Company-ID
+GET    /api/v1/dashboard/projects/<uuid>/         auth + X-Company-ID
+GET    /api/v1/audit-logs/                         auth + X-Company-ID (OWNER, paginated)
 ```

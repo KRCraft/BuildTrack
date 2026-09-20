@@ -50,9 +50,11 @@ def inventory_operator(request, location=None, project=None):
 
 class MaterialListCreateView(APIView):
     def get(self,request):
+        from django.db.models import Q
         company=request_company(request); queryset=Material.objects.filter(company=company)
-        if request.query_params.get("search"): queryset=queryset.filter(name__icontains=request.query_params["search"]) | queryset.filter(code__icontains=request.query_params["search"])
+        if request.query_params.get("search"): queryset=queryset.filter(Q(name__icontains=request.query_params["search"]) | Q(code__icontains=request.query_params["search"]))
         if request.query_params.get("category"): queryset=queryset.filter(category__iexact=request.query_params["category"])
+        queryset=queryset.order_by("name")
         return Response(MaterialSerializer(queryset,many=True,context={"company":company}).data)
     @transaction.atomic
     def post(self,request):

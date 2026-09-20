@@ -1,7 +1,9 @@
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from apps.audit.services import audit_event
@@ -39,8 +41,17 @@ class ProjectListCreateView(APIView):
         if status_filter:
             queryset = queryset.filter(status=status_filter)
         if search:
-            queryset = queryset.filter(name__icontains=search) | queryset.filter(code__icontains=search) | queryset.filter(client_name__icontains=search)
-        return Response(ProjectSerializer(queryset.distinct(), many=True).data)
+            queryset = queryset.filter(Q(name__icontains=search) | Q(code__icontains=search) | Q(client_name__icontains=search))
+        queryset = queryset.distinct().order_by("-created_at")
+        # Paginated (keeps bare array for backwards compat if ?paginate=false)
+        if request.query_params.get("paginate") == "false":
+            return Response(ProjectSerializer(queryset, many=True).data)
+        page = PageNumberPagination()
+        page.page_size = 25
+        result = page.paginate_queryset(queryset, request)
+        if result is not None:
+            return page.get_paginated_response(ProjectSerializer(result, many=True).data)
+        return Response(ProjectSerializer(queryset, many=True).data)
 
     @transaction.atomic
     def post(self, request):

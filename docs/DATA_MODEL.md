@@ -1,215 +1,349 @@
-# BuildTrack — Data Model v1
+# BuildTrack — Data Model v1.1
 
-> DB: PostgreSQL (prod) / SQLite (dev). ORM: Django.  
-> This doc is the source of truth for entities, fields, and relations. Backend `backend/apps/*` models MUST match it. Frontend mirror: `frontend/src/utils/apiTypes.js`.
+> DB: PostgreSQL (prod) / SQLite (dev USE_SQLITE=True). ORM: Django 5.  
+> Source of truth: `backend/apps/*/models.py`. Frontend mirror: `frontend/src/utils/apiTypes.js` (legacy) + `frontend/lib/api.ts` types.
 
 ---
 
-## 1. ER overview (text diagram)
+## 1. ER overview (live, 2026-09-20)
 
 ```
-                    ┌──────────┐
-                    │   User   │ 1
-                    └────┬─────┘
-                         │ 1:1 (nullable, a client may exist without login and vice versa)
-                    ┌────▼─────┐
-                    │  Client  │ 1
-                    └────┬─────┘
-                         │ 1:N
-        ┌────────────────┼────────────────┐
-        │                │                │
-   ┌────▼─────┐    ┌─────▼──────┐   ┌─────▼──────────┐
-   │ Project  │◄───│QuoteRequest│   │ ContactMessage │ (standalone, no FK)
-   │          │ 1  │ (→Project  │   └────────────────┘
-   │          │◄───┤ on accept, │
-   └────┬─────┘ N  │ nullable)  │
-        │ 1        └────────────┘
-        │ N
-   ┌────▼───────┐     ┌──────────┐
-   │ Testimonial│ N:1 │ Milestone│ (nested under Project, optional MVP table)
-   └────────────┘     └──────────┘
-
-User 1:N QuoteRequest (optional `submitted_by` FK for authenticated submissions)
-User 1:N Testimonial  (optional `author` FK)
+                         ┌─────────┐
+                         │ Company │ 1
+                         └────┬────┘
+                              │ 1:N
+              ┌───────────────┼────────────────┐
+              │               │                │
+       ┌──────▼─────┐   ┌─────▼──────┐   ┌────▼─────┐
+       │ Membership │   │  Project   │   │ Material │
+       │ (User ↔    │   │ (code,     │   └────┬─────┘
+       │  Company)  │   │  status)   │        │
+       └─────┬──────┘   └─────┬──────┘        │
+             │ 1:N            │ 1:1           │ N:M via balances/transactions
+             │          ┌─────▼──────┐        │
+             └──────────┤ Assignment │   ┌────▼────────────────┐
+                        └────────────┘   │ InventoryLocation   │
+                                         │ InventoryBalance    │
+                                         │ MaterialTransaction │
+                                         │ InventoryTransfer   │
+                                         └─────────────────────┘
+                              ┌──────────┬──────┴──────┬──────────┐
+                              │          │             │          │
+                        ┌─────▼─────┐ ┌──▼─────┐ ┌────▼─────┐ ┌──▼────┐
+                        │  Budget   │ │Expense │ │  Worker  │ │ Daily │
+                        │  Version  │ │ Supplier│ │          │ │ Report│
+                        │  Category │ └────────┘ └──────────┘ │Revision│
+                        └───────────┘                          └───────┘
+                              │
+                        ┌─────▼──────┐
+                        │  AuditLog  │ (immutable, company-scoped)
+                        └────────────┘
 ```
 
 Relation summary:
 
 | From | To | Type | On delete | Notes |
 |------|----|------|-----------|-------|
-| Client → User | `user` | 1:1 nullable | SET_NULL | CRM record survives account deletion |
-| Project → Client | `client` | N:1 nullable | SET_NULL | keep portfolio if client removed |
-| QuoteRequest → User | `submitted_by` | N:1 nullable | SET_NULL | public quotes have null |
-| QuoteRequest → Project | `converted_project` | 1:1 nullable | SET_NULL | set on accept+create |
-| Testimonial → Project | `project` | N:1 nullable | SET_NULL | keep testimonial if project deleted |
-| Testimonial → User | `author` | N:1 nullable | SET_NULL | |
-| Milestone → Project | `project` | N:1 | CASCADE | milestones die with project |
-| ContactMessage | — | standalone | — | no FKs by design (spam-safe) |
+| Company → User via Membership | M:N | PROTECT/CASCADE | tenant isolation via `X-Company-ID` |
+| Project → Company | N:1 | PROTECT | all company-scoped |
+| Budget → Project | 1:1 | PROTECT | one budget per project |
+| BudgetVersion → Budget | N:1 | CASCADE | `active_version` FK on Budget |
+| Expense → Project, BudgetCategory, Supplier | N:1 | PROTECT | must match company+approved budget |
+| Material → Company | N:1 | PROTECT | `code` unique per company |
+| InventoryBalance → Material+Location | N:1 | CASCADE | quantity_on_hand aggregated |
+| MaterialTransaction → Company+Project+Location | N:1 | PROTECT | signed qty, idempotency |
+| DailyReport → Project | N:1 | CASCADE | `report_date` unique per project |
+| DailyReportRevision → DailyReport | N:1 | CASCADE | `revision_number` monotonic |
+| AuditLog → Company, User | N:1 nullable | PROTECT/SET_NULL | immutable |
+
+Legacy tables kept on disk but **not in `INSTALLED_APPS`**: `clients_client`, `quotes_quoterequest`, `contact_contactmessage`, `testimonials_testimonial` — see §7.
 
 ---
 
-## 2. Tables
+## 2. Tables (live)
 
-### 2.1 User (`users_user` — custom user, email as username)
-
-| Field | Type | Constraints | Description |
-|-------|------|-------------|-------------|
-| `id` | SERIAL PK | — | |
-| `email` | VARCHAR(254) | UNIQUE, NOT NULL, indexed | login identifier |
-| `password` | VARCHAR(128) | NOT NULL (hashed) | Django hashing |
-| `full_name` | VARCHAR(150) | NOT NULL | display name |
-| `phone` | VARCHAR(20) | NULL/blank | E.164 preferred |
-| `company` | VARCHAR(150) | NULL/blank | |
-| `role` | VARCHAR(20) | choices `admin\|client`, default `client` | coarse RBAC; `is_staff` mirrors `admin` |
-| `is_staff` | BOOL | default False | Django admin access |
-| `is_active` | BOOL | default True | soft-disable |
-| `created_at` | TIMESTAMPTZ | auto_now_add | |
-| `updated_at` | TIMESTAMPTZ | auto_now | |
-
-Indexes: `email` unique. Choices enforced at model + serializer level.
-
-### 2.2 Client (`clients_client`)
-
-CRM record, admin-managed. May link to a `User`.
+### 2.1 Company (`companies_company`)
 
 | Field | Type | Constraints | Description |
 |-------|------|-------------|-------------|
-| `id` | SERIAL PK | — | |
-| `full_name` | VARCHAR(150) | NOT NULL | |
-| `company` | VARCHAR(150) | NULL/blank | |
-| `email` | EMAIL | NULL/blank, UNIQUE where not null | contact email |
-| `phone` | VARCHAR(20) | NULL/blank, indexed | |
-| `address` | TEXT | NULL/blank | |
-| `user` | FK → User | NULL/blank, UNIQUE, SET_NULL | linked login |
-| `notes` | TEXT | NULL/blank | internal, never public |
-| `created_at` | TIMESTAMPTZ | auto_now_add | |
-| `updated_at` | TIMESTAMPTZ | auto_now | |
+| `id` | UUID PK | default uuid4 |  |
+| `name` | VARCHAR(255) | NOT NULL |  |
+| `slug` | SLUG(80) | UNIQUE | auto from name `-2` suffix on collision |
+| `currency_code` | CHAR(3) | regex `^[A-Z]{3}$`, default `UZS` | company accounting currency |
+| `timezone` | VARCHAR(64) | default `Asia/Tashkent` |  |
+| `country_code` | VARCHAR(2) | blank |  |
+| `address` | TEXT | blank |  |
+| `is_active` | BOOL | default True, indexed |  |
+| `created_at` | TIMESTAMPTZ | auto_now_add |  |
+| `updated_at` | TIMESTAMPTZ | auto_now |  |
 
-Derived (annotated, not columns): `projects_count`, `active_quotes_count` (quotes with status in `new|contacted|estimated` matching email/phone).
-
-### 2.3 Project (`projects_project`)
+### 2.2 User (`accounts_user` — custom, email as USERNAME_FIELD)
 
 | Field | Type | Constraints | Description |
 |-------|------|-------------|-------------|
-| `id` | SERIAL PK | — | |
-| `title` | VARCHAR(200) | NOT NULL | |
-| `slug` | SLUG | UNIQUE, indexed | auto from title |
-| `description` | TEXT | NOT NULL | |
-| `client` | FK → Client | NULL, SET_NULL, indexed | owner |
-| `status` | VARCHAR(20) | choices `planned\|in_progress\|on_hold\|completed\|cancelled`, default `planned`, indexed | workflow state |
-| `progress` | SMALLINT | 0–100, default 0, validators | % complete |
-| `budget` | DECIMAL(12,2) | NULL, >= 0 | |
-| `currency` | CHAR(3) | default `USD` | ISO code |
-| `start_date` | DATE | NULL | |
-| `end_date` | DATE | NULL, must be >= start_date | validated |
-| `location` | VARCHAR(255) | NULL/blank | |
-| `cover_image` | IMAGE | NULL/blank, upload `projects/covers/` | |
-| `gallery` | JSONB | default `[]` | list of image URLs/paths (MVP-simple vs M2M table) |
-| `is_published` | BOOL | default True, indexed | public visibility gate |
-| `is_featured` | BOOL | default False, indexed | homepage showcase |
-| `tracking_code` | VARCHAR(20) | UNIQUE, indexed, auto `BT-YYYY-NNNN` | public tracking lookup |
-| `created_at` | TIMESTAMPTZ | auto_now_add | |
-| `updated_at` | TIMESTAMPTZ | auto_now | |
+| `id` | UUID PK |  |  |
+| `username` | VARCHAR(150) | UNIQUE, editable=False, auto uuid hex | internal, not used |
+| `email` | EMAIL | UNIQUE, NOT NULL | login identifier |
+| `first_name` | VARCHAR(150) | NOT NULL |  |
+| `last_name` | VARCHAR(150) | blank |  |
+| `password` | VARCHAR(128) | hashed | Django validators (4) |
+| `is_staff` | BOOL |  |  |
+| `is_active` | BOOL |  |  |
+| `created_at` | TIMESTAMPTZ | via UUIDTimeStampedModel? actually AbstractUser |  |
 
-Business rules:
-- `completed` requires `progress == 100` (serializer auto-sets 100 on transition, or rejects otherwise — pick one and document; recommended: auto-set).
-- `cancelled` is terminal; no transitions out (reject in serializer).
-- Public list queryset: `is_published=True`. Admin: all.
-- `tracking_code` generated in `save()` if blank; never editable via API (read-only serializer field).
+### 2.3 CompanyMembership (`companies_companymembership`)
 
-### 2.4 Milestone (`projects_milestone` — nested, optional but recommended)
+| Field | Type | Constraints |
+|-------|------|-------------|
+| `id` | UUID PK |  |
+| `company` | FK Company | PROTECT |
+| `user` | FK User | CASCADE |
+| `role` | VARCHAR | choices `OWNER, PROJECT_MANAGER, SITE_MANAGER, ACCOUNTANT, VIEWER` |
+| `status` | VARCHAR | choices `ACTIVE, INACTIVE`, default `ACTIVE` |
+| `created_at`/`updated_at` | TIMESTAMPTZ |  |
 
-| Field | Type | Constraints | Description |
-|-------|------|-------------|-------------|
-| `id` | SERIAL PK | — | |
-| `project` | FK → Project | CASCADE, related_name `milestones`, indexed | |
-| `title` | VARCHAR(200) | NOT NULL | e.g. "Foundation" |
-| `description` | TEXT | NULL/blank | |
-| `due_date` | DATE | NULL | |
-| `is_completed` | BOOL | default False | |
-| `order` | SMALLINT | default 0 | display order |
-| `created_at` | TIMESTAMPTZ | auto_now_add | |
+Unique: `(company, user)`. `is_active` helper filters `status=ACTIVE` + `company.is_active`.
 
-Serialized nested read-only inside Project detail; separate CRUD only if needed (`/api/projects/:id/milestones/` read MVP).
+### 2.4 CompanyInvitation (`companies_companyinvitation`)
 
-### 2.5 QuoteRequest (`quotes_quoterequest`)
+| Field | Type |
+|-------|------|
+| `company` FK | PROTECT |
+| `email` | invited email, lower-cased match |
+| `role` | requested role |
+| `token_hash` | SHA256 of `secrets.token_urlsafe(32)`, UNIQUE |
+| `status` | `PENDING, ACCEPTED, REVOKED, EXPIRED` |
+| `expires_at` | `now+7d` |
+| `created_by` FK User | PROTECT |
 
-| Field | Type | Constraints | Description |
-|-------|------|-------------|-------------|
-| `id` | SERIAL PK | — | |
-| `tracking_id` | VARCHAR(20) | UNIQUE, auto `Q-YYYY-NNNN`, indexed | customer-facing ref |
-| `full_name` | VARCHAR(150) | NOT NULL | |
-| `email` | EMAIL | NOT NULL, indexed | |
-| `phone` | VARCHAR(20) | NOT NULL, indexed | |
-| `service_type` | VARCHAR(20) | choices `construction\|renovation\|design\|consulting\|other`, default `other`, indexed | |
-| `budget_range` | VARCHAR(20) | choices `under_10k\|10k_50k\|50k_100k\|over_100k\|undecided`, default `undecided` | lead qualification |
-| `message` | TEXT | NOT NULL, min 10 | project description |
-| `preferred_contact` | VARCHAR(20) | choices `phone\|email\|telegram\|whatsapp`, default `phone` | |
-| `attachment_url` | URL | NULL/blank | MVP-simple (future: file table) |
-| `status` | VARCHAR(20) | choices `new\|contacted\|estimated\|accepted\|declined\|expired`, default `new`, indexed | pipeline |
-| `estimated_price` | DECIMAL(12,2) | NULL, >= 0 | set by admin |
-| `admin_notes` | TEXT | NULL/blank, admin-only (excluded from client serializer) | |
-| `submitted_by` | FK → User | NULL, SET_NULL | authenticated submitter |
-| `converted_project` | OneToOne → Project | NULL, SET_NULL | set on accept+create |
-| `created_at` | TIMESTAMPTZ | auto_now_add, indexed | SLA sorting |
-| `updated_at` | TIMESTAMPTZ | auto_now | |
+Flow: pending → revoked on re-invite, expired if `expires_at <= now`.
 
-State machine (enforced in serializer/`clean()`):
+### 2.5 Project (`projects_project`)
 
-```
-new → contacted → estimated → accepted
-                          ↘ declined
-new → declined | expired (admin)
-```
+| Field | Type | Constraints |
+|-------|------|-------------|
+| `id` | UUID PK |  |
+| `company` | FK Company | PROTECT |
+| `code` | VARCHAR(50) | UNIQUE per company, `code__iexact` validated |
+| `name` | VARCHAR(200) |  |
+| `client_name` | VARCHAR(200) | denormalized |
+| `status` | VARCHAR | `DRAFT, ACTIVE, ON_HOLD, COMPLETED, ARCHIVED` |
+| `budget_planned` | DECIMAL(12,2) | nullable |
+| `progress_percent_cache` | DECIMAL(5,2) | 0–100, from approved reports |
+| `is_archived` | BOOL |  |
+| `version` | INT | optimistic lock |
+| `created_by` FK User | PROTECT |
 
-`estimated` should normally carry non-null `estimated_price` (warn, don't hard-fail — startup-flexible).
+Indexes: `(company, code)`, `(company, status)`.
 
-### 2.6 ContactMessage (`contact_contactmessage`)
+### 2.6 ProjectAssignment (`projects_projectassignment`)
 
-| Field | Type | Constraints | Description |
-|-------|------|-------------|-------------|
-| `id` | SERIAL PK | — | |
-| `name` | VARCHAR(150) | NOT NULL | |
-| `email` | EMAIL | NOT NULL | |
-| `phone` | VARCHAR(20) | NULL/blank | |
-| `subject` | VARCHAR(200) | NOT NULL | |
-| `message` | TEXT | NOT NULL, min 10 | |
-| `is_read` | BOOL | default False, indexed | inbox filter |
-| `reply_note` | TEXT | NULL/blank, admin-only | internal follow-up |
-| `created_at` | TIMESTAMPTZ | auto_now_add | |
+| Field | Type |
+|-------|------|
+| `project` FK | CASCADE |
+| `membership` FK CompanyMembership | CASCADE |
+| `assignment_role` | `PROJECT_MANAGER, SITE_MANAGER, VIEWER` etc |
+| `is_active` BOOL |  |
 
-No FKs. Rate-limit public POST (5/hour/IP).
+Company-scoped: `project.company == membership.company`.
 
-### 2.7 Testimonial (`testimonials_testimonial`)
+### 2.7 Budget (`budgets_budget`)
 
-| Field | Type | Constraints | Description |
-|-------|------|-------------|-------------|
-| `id` | SERIAL PK | — | |
-| `client_name` | VARCHAR(150) | NOT NULL | display name |
-| `company` | VARCHAR(150) | NULL/blank | |
-| `project` | FK → Project | NULL, SET_NULL | proof link |
-| `rating` | SMALLINT | 1–5, NOT NULL, validators | |
-| `text` | TEXT | NOT NULL, 20–1000 chars | |
-| `avatar` | IMAGE | NULL/blank, upload `testimonials/avatars/` | |
-| `author` | FK → User | NULL, SET_NULL | authenticated author |
-| `is_approved` | BOOL | default False, indexed | public gate |
-| `is_featured` | BOOL | default False | carousel pick |
-| `created_at` | TIMESTAMPTZ | auto_now_add | |
-| `updated_at` | TIMESTAMPTZ | auto_now | |
+| Field | Type |
+|-------|------|
+| `company` FK | PROTECT |
+| `project` OneToOne Project | PROTECT |
+| `active_version` FK BudgetVersion nullable | SET_NULL |
+| `created_by` FK User | PROTECT |
 
-Public list queryset: `is_approved=True`. Submissions always create `is_approved=False` (even from staff via public endpoint — staff approves via PATCH).
+### 2.8 BudgetVersion (`budgets_budgetversion`)
+
+| Field | Type |
+|-------|------|
+| `company` FK | PROTECT |
+| `budget` FK Budget | CASCADE |
+| `version_number` INT | monotonic |
+| `status` | `DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, SUPERSEDED` |
+| `currency_code` | copies `company.currency_code` |
+| `total_planned_amount` DECIMAL | `SUM categories.planned_amount` via `refresh_total()` |
+| `version` INT | lock |
+| `submitted_by/approved_by` FK User nullable | SET_NULL |
+
+### 2.9 BudgetCategory (`budgets_budgetcategory`)
+
+| Field | Type |
+|-------|------|
+| `company` FK | PROTECT |
+| `budget_version` FK | CASCADE |
+| `parent` FK self nullable | CASCADE |
+| `name` VARCHAR |  |
+| `planned_amount` DECIMAL |  |
+| `lineage_key` UUID | preserves lineage across revisions |
+
+### 2.10 Supplier (`expenses_supplier`)
+
+| Field | Type |
+|-------|------|
+| `company` FK | PROTECT |
+| `name` VARCHAR |  |
+| `tax_id`, `phone`, `email`, `address` | nullable |
+| `is_active` BOOL |  |
+
+### 2.11 Expense (`expenses_expense`)
+
+| Field | Type |
+|-------|------|
+| `id` UUID PK |  |
+| `company` FK | PROTECT |
+| `project` FK | PROTECT, must match company |
+| `budget_category` FK | PROTECT, must be in `project.budget.active_version` |
+| `supplier` FK nullable | PROTECT |
+| `expense_type` | `STANDARD, REVERSAL` |
+| `reverses_expense` FK self nullable | PROTECT |
+| `amount` DECIMAL(12,2) |  |
+| `currency_code` CHAR(3) | must == `company.currency_code` |
+| `expense_date` DATE |  |
+| `status` | `DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, CANCELLED` |
+| `idempotency_key` UUID nullable | UNIQUE per company |
+| `correction_group_id` UUID | uuid4, shared with reversal |
+| `version` INT |  |
+
+Approvals: `ExpenseApproval` (`action` SUBMITTED/APPROVED/REJECTED/REVERSED) + `ExpenseAttachment` (FileField, 10MB, PDF/JPG/PNG).
+
+### 2.12 Material (`inventory_material`)
+
+| Field | Type |
+|-------|------|
+| `company` FK | PROTECT |
+| `name` VARCHAR |  |
+| `code` VARCHAR | UNIQUE per company |
+| `unit` VARCHAR | `kg, m, pcs` etc |
+| `category` VARCHAR nullable | filter |
+| `minimum_stock_level` DECIMAL | validator >=0 |
+| `is_active` BOOL |  |
+
+### 2.13 InventoryLocation (`inventory_inventorylocation`)
+
+| Field | Type |
+|-------|------|
+| `company` FK | PROTECT |
+| `name` VARCHAR |  |
+| `project` FK nullable | PROTECT, if set must be in `company_projects` |
+| `location_type` | `WAREHOUSE, PROJECT_SITE` |
+| `address` TEXT blank |  |
+
+### 2.14 InventoryBalance (`inventory_inventorybalance`)
+
+| Field | Type |
+|-------|------|
+| `company` FK | PROTECT |
+| `material` FK | CASCADE |
+| `location` FK | CASCADE |
+| `quantity_on_hand` DECIMAL | signed aggregation via `record_transaction()` |
+
+Unique: `(material, location)`.
+
+### 2.15 MaterialTransaction (`inventory_materialtransaction`)
+
+| Field | Type |
+|-------|------|
+| `company` FK | PROTECT |
+| `material` FK | PROTECT |
+| `location` FK | PROTECT |
+| `project` FK nullable | PROTECT |
+| `transaction_type` | `RECEIVE, USE, TRANSFER_OUT, TRANSFER_IN, ADJUSTMENT_IN, ADJUSTMENT_OUT` |
+| `quantity` DECIMAL | always positive, signed via `signed_quantity` property |
+| `occurred_at` TIMESTAMPTZ |  |
+| `idempotency_key` UUID nullable | UNIQUE |
+| `reversal_of` FK self nullable | PROTECT |
+
+Blocks negative stock: `quantity_on_hand + signed < 0` → `ValidationError`.
+
+### 2.16 InventoryTransfer (`inventory_inventorytransfer`)
+
+| Field | Type |
+|-------|------|
+| `company` FK | PROTECT |
+| `source_location` FK | PROTECT |
+| `destination_location` FK | PROTECT |
+| `status` | `DRAFT, DISPATCHED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED` |
+| `purpose` VARCHAR | `SITE_TRANSFER` etc |
+| `dispatch_idempotency_key`, `receive_idempotency_key` UUID nullable |  |
+
+Items: `InventoryTransferItem` (`material`, `quantity_requested/dispatched/received`).
+
+### 2.17 Worker (`workforce_worker`)
+
+| Field | Type |
+|-------|------|
+| `company` FK | PROTECT |
+| `full_name` VARCHAR |  |
+| `phone` VARCHAR blank |  |
+| `specialty` VARCHAR blank |  |
+| `status` | `ACTIVE, INACTIVE` |
+| `created_by` FK User | PROTECT |
+
+Assignment via `ProjectAssignment` or workforce-specific M2M.
+
+### 2.18 DailyReport (`reports_dailyreport`)
+
+| Field | Type |
+|-------|------|
+| `company` FK | PROTECT |
+| `project` FK | CASCADE |
+| `report_date` DATE | UNIQUE per project |
+| `approved_revision` FK DailyReportRevision nullable | SET_NULL |
+| `created_by` FK User | PROTECT |
+
+### 2.19 DailyReportRevision (`reports_dailyreportrevision`)
+
+| Field | Type |
+|-------|------|
+| `company` FK | PROTECT |
+| `daily_report` FK | CASCADE |
+| `revision_number` INT | monotonic |
+| `work_completed` TEXT |  |
+| `progress_delta` DECIMAL(5,2) | can be negative (requires PM/OWNER + reason) |
+| `worker_count` INT |  |
+| `issues`, `weather_notes` TEXT |  |
+| `revision_reason` TEXT | required if not first |
+| `status` | `DRAFT, SUBMITTED, APPROVED, REJECTED, SUPERSEDED` |
+| `version` INT | lock |
+
+Material usages: `DailyReportMaterialUsage` (`material`, `inventory_location`, `quantity_used`, `material_transaction` FK nullable — set on APPROVE via `record_transaction USE`).
+
+### 2.20 AuditLog (`audit_auditlog`)
+
+| Field | Type |
+|-------|------|
+| `company` FK nullable | PROTECT |
+| `actor` FK User nullable | SET_NULL |
+| `actor_snapshot` JSON |  |
+| `action` VARCHAR(120) | e.g. `project.created`, `inventory.transfer_dispatched` |
+| `entity_type`, `entity_id` | polymorphic |
+| `before_state`, `after_state` JSON | DjangoJSONEncoder |
+| `request_id` UUID | `X-Request-ID` or random |
+| `ip_address` | `X-Forwarded-For` first hop |
+| `user_agent` TEXT |  |
+
+Immutable: `save()` blocks update if PK exists, `delete()` raises. Bulk `QuerySet.delete/update` still bypasses — add DB trigger for hard guarantee (future). Only `OWNER` can list.
 
 ---
 
-## 3. Seed / fixture guidance (startup-appropriate)
+## 3. Migration order
 
-- 1 admin (`admin@buildtrack.example.com`), 2 demo clients + users, 6 projects (3 featured, mixed statuses), 4 approved testimonials + 1 pending, 3 quotes in different pipeline stages, 2 unread contact messages.
-- Use factories/fixtures so frontend can develop against realistic data on day one.
+1. `common` (abstract) → 2. `accounts` (User) → 3. `companies` (Company, Membership, Invitation) → 4. `projects` (Project, Assignment) → 5. `budgets` (Budget, Version, Category) → 6. `expenses` (Supplier, Expense) → 7. `inventory` (Material, Location, Balance, Transaction, Transfer) → 8. `workforce` (Worker) → 9. `reports` (DailyReport, Revision) → 10. `audit` → 11. `dashboard` (views only, no models).
 
-## 4. Migration order
+Legacy `clients, quotes, contact` migrations exist on disk but not applied (not in INSTALLED_APPS) — do not run.
 
-1. `users` (no deps) → 2. `clients` (dep users) → 3. `projects` (dep clients) + milestones → 4. `quotes` (dep users, projects) → 5. `contact` (none) → 6. `testimonials` (dep projects, users).
+---
 
-## 5. Non-goals (explicitly excluded from v1 schema)
+## 4. Seed / fixture guidance
 
-No payments, notifications, comments, file-attachments table, audit log, or multi-tenant orgs. `gallery` as JSONB and `attachment_url` as URL keep MVP lean; normalize later if needed.
+- 1 owner user, 2 companies (UZS), 3 projects (ACTIVE/COMPLETED), 1 budget per project with 2 versions (DRAFT→APPROVED), 3 suppliers, 5 expenses (DRAFT→APPROVED→reversal), 4 materials + 2 warehouses + 2 project sites, balances via RECEIVE, 2 transfers (DISPATCHED→RECEIVED), 3 workers, 2 daily reports with revisions, audit logs auto.
+
+---
+
+## 5. Non-goals
+
+No payments gateway, no S3, no billing. `gallery` is JSONB/no table, `attachment_url` is FileField `media/` (S3 in prod). Redis optional until Celery.
