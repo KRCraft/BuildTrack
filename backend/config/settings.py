@@ -78,6 +78,10 @@ CSRF_COOKIE_HTTPONLY = True
 AUTH_LOCKOUT_MAX_ATTEMPTS = 5
 AUTH_LOCKOUT_WINDOW_SECONDS = 900  # 15 min
 PASSWORD_RESET_TIMEOUT = 3600  # 1h token validity via default_token_generator expiry not configurable, but throttle window
+# Email verification
+REQUIRE_EMAIL_VERIFICATION = os.environ.get("REQUIRE_EMAIL_VERIFICATION", "False").lower() == "true"
+EMAIL_VERIFICATION_TIMEOUT_DAYS = int(os.environ.get("EMAIL_VERIFICATION_TIMEOUT_DAYS", "1"))  # used by default_token_generator via PASSWORD_RESET_TIMEOUT
+PASSWORD_RESET_TIMEOUT_DAYS = int(os.environ.get("PASSWORD_RESET_TIMEOUT_DAYS", "1"))  # for reference; default_token_generator uses settings.PASSWORD_RESET_TIMEOUT internally on Django 5.x
 # Logging for auth events
 LOGGING = {
     "version": 1,
@@ -95,7 +99,7 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 25,
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
     "DEFAULT_THROTTLE_CLASSES": ("rest_framework.throttling.AnonRateThrottle", "rest_framework.throttling.UserRateThrottle"),
-    "DEFAULT_THROTTLE_RATES": {"anon": "100/hour", "user": "1000/hour", "login": "5/minute", "register": "5/hour", "password_reset": "3/hour"},
+    "DEFAULT_THROTTLE_RATES": {"anon": "100/hour", "user": "1000/hour", "login": "5/minute", "register": "5/hour", "password_reset": "3/hour", "email_verification": "10/hour", "verify_email": "10/hour", "resend_verification": "5/hour"},
 }
 SIMPLE_JWT = {"ACCESS_TOKEN_LIFETIME": timedelta(minutes=15), "REFRESH_TOKEN_LIFETIME": timedelta(days=7), "ROTATE_REFRESH_TOKENS": True, "BLACKLIST_AFTER_ROTATION": True, "AUTH_HEADER_TYPES": ("Bearer",)}
 REFRESH_COOKIE_NAME = "buildtrack_refresh"

@@ -19,3 +19,15 @@ class BurstAnonThrottle(AnonRateThrottle):
 
 class BurstUserThrottle(UserRateThrottle):
     scope = "user"
+
+
+class VerifyEmailRateThrottle(AnonRateThrottle):
+    scope = "verify_email"
+
+
+class ResendVerificationRateThrottle(AnonRateThrottle):
+    scope = "resend_verification"
+
+
+class EmailVerificationRateThrottle(AnonRateThrottle):
+    scope = "email_verification"

@@ -15,13 +15,34 @@ from rest_framework.exceptions import ValidationError as DRFValidationError
 from apps.audit.services import audit_event
 from .lockout import clear_lockout, get_client_ip, is_locked, record_failed
 from .models import User
-from .serializers import ChangePasswordSerializer, LoginSerializer, PasswordResetConfirmSerializer, PasswordResetSerializer, RegisterSerializer, UpdateMeSerializer, UserSerializer
+from .serializers import ChangePasswordSerializer, LoginSerializer, PasswordResetConfirmSerializer, PasswordResetSerializer, RegisterSerializer, ResendVerificationSerializer, UpdateMeSerializer, UserSerializer, VerifyEmailSerializer
 
 logger = logging.getLogger("apps.accounts")
 
 
 def set_refresh_cookie(response, refresh):
     response.set_cookie(settings.REFRESH_COOKIE_NAME, str(refresh), httponly=True, secure=settings.REFRESH_COOKIE_SECURE, samesite=settings.REFRESH_COOKIE_SAMESITE, max_age=int(settings.SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"].total_seconds()), path="/api/v1/auth/")
+
+
+def send_verification_email(user, request=None):
+    """Generate uid/token via default_token_generator and send verification email (console backend)."""
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    token = default_token_generator.make_token(user)
+    subject = "Verify your BuildTrack email"
+    # Console backend will print to stdout; in prod this would be a frontend link.
+    message = (
+        f"Hi {user.first_name},\n\n"
+        f"Please verify your email for BuildTrack.\n"
+        f"Use this payload in the app: uid={uid}&token={token}\n\n"
+        f"Or call POST /api/v1/auth/verify-email/ with {{\"uid\": \"{uid}\", \"token\": \"{token}\"}}\n"
+    )
+    try:
+        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [user.email])
+    except Exception as exc:
+        logger.exception("auth.verification_email_failed email=%s error=%s", user.email, exc)
+        raise
+    logger.info("auth.verification_email_sent email=%s ip=%s", user.email, get_client_ip(request) if request else "unknown")
+    return uid, token
 
 
 class RegisterView(APIView):
@@ -35,6 +56,13 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        # Send verification email via console backend (default_token_generator)
+        try:
+            send_verification_email(user, request)
+            audit_event(request, None, "auth.verification_email_sent", user, after_state={"email": user.email})
+        except Exception:
+            # Do not fail registration if email fails; log already done in helper
+            pass
         refresh = RefreshToken.for_user(user)
         audit_event(request, None, "auth.register", user, after_state={"email": user.email})
         logger.info("auth.register email=%s ip=%s", user.email, get_client_ip(request))
@@ -63,11 +91,26 @@ class LoginView(APIView):
             # Map serializer errors to 401 for login to avoid 400 fingerprinting
             return Response({"detail": "Invalid email or password."}, status=status.HTTP_401_UNAUTHORIZED)
         user = serializer.validated_data["user"]
+        # Email verification check: block if REQUIRE_EMAIL_VERIFICATION True, else allow but warn (backward compat)
+        if not getattr(user, "is_email_verified", False):
+            if getattr(settings, "REQUIRE_EMAIL_VERIFICATION", False):
+                logger.warning("auth.login.blocked_unverified email=%s ip=%s", user.email, ip)
+                audit_event(request, None, "auth.login.blocked_unverified", user, after_state={"email": user.email})
+                return Response(
+                    {"detail": "Email not verified. Please verify your email.", "code": "email_not_verified"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            else:
+                logger.warning("auth.login.unverified email=%s ip=%s", user.email, ip)
         clear_lockout(email_key, ip)
         refresh = RefreshToken.for_user(user)
         audit_event(request, None, "auth.login", user, after_state={"email": user.email})
         logger.info("auth.login success email=%s ip=%s", user.email, ip)
-        response = Response({"user": UserSerializer(user).data, "access": str(refresh.access_token)})
+        payload = {"user": UserSerializer(user).data, "access": str(refresh.access_token)}
+        # Backward compat warning when email not verified but login allowed
+        if not getattr(user, "is_email_verified", False):
+            payload["warning"] = "Email not verified. Please verify your email."
+        response = Response(payload)
         set_refresh_cookie(response, refresh)
         return response
 
@@ -206,3 +249,52 @@ class PasswordResetConfirmView(APIView):
         audit_event(request, None, "auth.password_reset_completed", user, after_state={"email": user.email})
         logger.info("auth.password_reset_completed email=%s ip=%s", user.email, get_client_ip(request))
         return Response({"detail": "Password updated."})
+
+
+class VerifyEmailView(APIView):
+    permission_classes = [permissions.AllowAny]
+    throttle_scope = "verify_email"
+
+    def get_throttles(self):
+        return [ScopedRateThrottle()]
+
+    def post(self, request):
+        serializer = VerifyEmailSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            user = User.objects.get(pk=force_str(urlsafe_base64_decode(serializer.validated_data["uid"])))
+        except Exception:
+            return Response({"detail": "Verification link is invalid."}, status=status.HTTP_400_BAD_REQUEST)
+        if getattr(user, "is_email_verified", False):
+            return Response({"detail": "Email already verified."}, status=status.HTTP_200_OK)
+        if not default_token_generator.check_token(user, serializer.validated_data["token"]):
+            return Response({"detail": "Verification link is invalid or expired."}, status=status.HTTP_400_BAD_REQUEST)
+        user.is_email_verified = True
+        user.save(update_fields=["is_email_verified"])
+        audit_event(request, None, "auth.email_verified", user, after_state={"email": user.email})
+        logger.info("auth.email_verified email=%s ip=%s", user.email, get_client_ip(request))
+        return Response({"detail": "Email verified successfully."}, status=status.HTTP_200_OK)
+
+
+class ResendVerificationView(APIView):
+    permission_classes = [permissions.AllowAny]
+    throttle_scope = "resend_verification"
+
+    def get_throttles(self):
+        return [ScopedRateThrottle()]
+
+    def post(self, request):
+        serializer = ResendVerificationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"].lower().strip()
+        user = User.objects.filter(email__iexact=email, is_active=True).first()
+        # Always return same message to avoid enumeration; but throttle and audit when sending
+        if user:
+            if getattr(user, "is_email_verified", False):
+                return Response({"detail": "Email already verified."}, status=status.HTTP_200_OK)
+            try:
+                send_verification_email(user, request)
+                audit_event(request, None, "auth.verification_email_resent", user, after_state={"email": user.email})
+            except Exception:
+                pass
+        return Response({"detail": "If an account exists, a verification email has been sent."}, status=status.HTTP_200_OK)

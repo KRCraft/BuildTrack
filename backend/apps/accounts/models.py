@@ -27,6 +27,7 @@ class User(AbstractUser):
     email = models.EmailField(unique=True)
     first_name = models.CharField(max_length=150)
     last_name = models.CharField(max_length=150, blank=True)
+    is_email_verified = models.BooleanField(default=False, help_text="Designates whether the user has verified their email address.")
     objects = UserManager()
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["first_name"]

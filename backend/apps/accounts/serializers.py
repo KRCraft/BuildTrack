@@ -8,7 +8,8 @@ from .models import User
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ("id", "email", "first_name", "last_name", "is_active")
+        fields = ("id", "email", "first_name", "last_name", "is_active", "is_email_verified")
+        read_only_fields = ("is_email_verified",)
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -84,3 +85,12 @@ class UpdateMeSerializer(serializers.ModelSerializer):
         model = User
         fields = ("first_name", "last_name")
         extra_kwargs = {"first_name": {"required": False}, "last_name": {"required": False}}
+
+
+class VerifyEmailSerializer(serializers.Serializer):
+    uid = serializers.CharField()
+    token = serializers.CharField()
+
+
+class ResendVerificationSerializer(serializers.Serializer):
+    email = serializers.EmailField()
