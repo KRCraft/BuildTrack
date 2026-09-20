@@ -1,0 +1,196 @@
+{
+  "info": {
+    "name": "BuildTrack API v1",
+    "description": "Startup MVP collection mirroring docs/API_CONTRACT.md. Base URL as variable `baseUrl` (default http://localhost:8000). Auth: Bearer JWT via `accessToken` variable.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000", "type": "string" },
+    { "key": "accessToken", "value": "", "type": "string" },
+    { "key": "refreshToken", "value": "", "type": "string" },
+    { "key": "projectId", "value": "1", "type": "string" },
+    { "key": "quoteId", "value": "1", "type": "string" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "auth",
+      "item": [
+        {
+          "name": "register",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/auth/register/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"client@example.com\",\n  \"password\": \"SecurePass123!\",\n  \"password_confirm\": \"SecurePass123!\",\n  \"full_name\": \"Amina Karimova\",\n  \"phone\": \"+998901234567\",\n  \"company\": \"Karimov Stroy\"\n}"
+            }
+          }
+        },
+        {
+          "name": "login",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/auth/login/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"client@example.com\",\n  \"password\": \"SecurePass123!\"\n}"
+            }
+          }
+        },
+        {
+          "name": "refresh",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/auth/refresh/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"refresh\": \"{{refreshToken}}\"\n}" }
+          }
+        },
+        {
+          "name": "me (get profile)",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/auth/me/" }
+        }
+      ]
+    },
+    {
+      "name": "projects",
+      "item": [
+        { "name": "list published", "request": { "method": "GET", "url": "{{baseUrl}}/api/projects/?page=1&page_size=12" } },
+        { "name": "featured", "request": { "method": "GET", "url": "{{baseUrl}}/api/projects/featured/" } },
+        {
+          "name": "create (admin)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/projects/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Office Renovation — IT Park\",\n  \"description\": \"450 m² office fit-out.\",\n  \"client\": 1,\n  \"status\": \"planned\",\n  \"progress\": 0,\n  \"budget\": \"42000.00\",\n  \"currency\": \"USD\",\n  \"start_date\": \"2026-10-01\",\n  \"end_date\": \"2027-01-30\",\n  \"location\": \"Tashkent, IT Park\",\n  \"is_published\": true,\n  \"is_featured\": false\n}"
+            }
+          }
+        },
+        { "name": "retrieve", "request": { "method": "GET", "url": "{{baseUrl}}/api/projects/{{projectId}}/" } },
+        {
+          "name": "update progress (admin)",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/projects/{{projectId}}/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"progress\": 70,\n  \"status\": \"in_progress\"\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "clients (admin)",
+      "item": [
+        { "name": "list", "request": { "method": "GET", "url": "{{baseUrl}}/api/clients/" } },
+        {
+          "name": "create",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/clients/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"full_name\": \"Amina Karimova\",\n  \"company\": \"Karimov Stroy\",\n  \"email\": \"client@example.com\",\n  \"phone\": \"+998901234567\",\n  \"address\": \"Tashkent, Amir Temur 15\"\n}"
+            }
+          }
+        },
+        { "name": "retrieve", "request": { "method": "GET", "url": "{{baseUrl}}/api/clients/1/" } }
+      ]
+    },
+    {
+      "name": "quotes",
+      "item": [
+        {
+          "name": "submit (public)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/quotes/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"full_name\": \"Otabek Nazarov\",\n  \"email\": \"otabek@example.com\",\n  \"phone\": \"+998909876543\",\n  \"service_type\": \"renovation\",\n  \"budget_range\": \"10k_50k\",\n  \"message\": \"Need 120 m² apartment renovation in Sergeli.\",\n  \"preferred_contact\": \"telegram\"\n}"
+            }
+          }
+        },
+        { "name": "list (client/admin)", "request": { "method": "GET", "url": "{{baseUrl}}/api/quotes/?status=new" } },
+        { "name": "retrieve", "request": { "method": "GET", "url": "{{baseUrl}}/api/quotes/{{quoteId}}/" } },
+        {
+          "name": "set estimated (admin)",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/quotes/{{quoteId}}/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"estimated\",\n  \"estimated_price\": \"18500.00\",\n  \"admin_notes\": \"Includes materials.\"\n}" }
+          }
+        },
+        {
+          "name": "accept + create project (admin)",
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/quotes/{{quoteId}}/accept/?create_project=true" }
+        }
+      ]
+    },
+    {
+      "name": "contact",
+      "item": [
+        {
+          "name": "submit (public)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/contact/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Dilnoza\",\n  \"email\": \"dilnoza@example.com\",\n  \"subject\": \"Partnership\",\n  \"message\": \"We supply cement. Interested in partnership?\"\n}"
+            }
+          }
+        },
+        { "name": "inbox (admin)", "request": { "method": "GET", "url": "{{baseUrl}}/api/contact/?is_read=false" } },
+        {
+          "name": "mark read (admin)",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/contact/1/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"is_read\": true,\n  \"reply_note\": \"Replied via email.\"\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "testimonials",
+      "item": [
+        { "name": "list approved (public)", "request": { "method": "GET", "url": "{{baseUrl}}/api/testimonials/?page_size=6" } },
+        {
+          "name": "submit (public)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/testimonials/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client_name\": \"Jasur Aliyev\",\n  \"company\": \"Aliyev Group\",\n  \"rating\": 5,\n  \"text\": \"BuildTrack delivered two weeks early. Transparent tracking was excellent.\",\n  \"project\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "approve (admin)",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/testimonials/1/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"is_approved\": true,\n  \"is_featured\": true\n}" }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,117 @@
+/* BuildTrack globals — merge-safe: does NOT replace index.css. Import both or import theme.css first. */
+@import url("https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap");
+@import "./theme.css";
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  font-family: var(--bt-font-body);
+  color: var(--bt-slate-700);
+  background: var(--bt-white);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--bt-font-heading);
+  color: var(--bt-slate-900);
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin: 0 0 0.5em;
+}
+
+a {
+  color: var(--bt-orange-dark);
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+.bt-container {
+  width: 100%;
+  max-width: 1140px;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+}
+
+.bt-section {
+  padding: 4rem 0;
+}
+
+.bt-section-alt {
+  background: var(--bt-slate-100);
+}
+
+.bt-hero {
+  background: var(--bt-slate-900);
+  color: #fff;
+  padding: 5rem 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.bt-hero h1 {
+  color: #fff;
+  font-size: clamp(2rem, 5vw, 3.5rem);
+  font-weight: 800;
+}
+
+.bt-hero p.bt-lead {
+  font-size: 1.2rem;
+  color: rgba(255, 255, 255, 0.85);
+  max-width: 36rem;
+}
+
+.bt-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1.5rem;
+}
+
+.bt-stats-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+  text-align: center;
+}
+
+.bt-stat-value {
+  font-family: var(--bt-font-heading);
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--bt-slate-900);
+  font-variant-numeric: tabular-nums;
+}
+
+.bt-stats-strip.dark .bt-stat-value {
+  color: #fff;
+}
+
+.bt-stat-label {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--bt-slate-500);
+}
+
+.bt-stats-strip.dark .bt-stat-label {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+@media (max-width: 640px) {
+  .bt-section {
+    padding: 2.5rem 0;
+  }
+}

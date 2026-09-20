@@ -1,0 +1,79 @@
+# Python / Django
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Django specifics
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+staticfiles/
+/staticfiles/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Node / Vite / React
+node_modules/
+dist/
+dist-ssr/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+!frontend/package-lock.json
+frontend/.npm-cache/
+frontend/.next/
+
+# Vite
+vite.config.*.timestamp*
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+
+# Docker
+.dockerignore
+!backend/.dockerignore
+!frontend/.dockerignore
+
+# Testing / coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.hypothesis/
+coverage.xml
+*.cover
+
+# Postman / misc
+*.har

@@ -1,0 +1,6 @@
+import { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
+
+export function Button({ className = "", ...props }: ButtonHTMLAttributes<HTMLButtonElement>) { return <button className={`rounded-lg bg-moss px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#175641] disabled:cursor-not-allowed disabled:opacity-50 ${className}`} {...props} />; }
+export function Input({ className = "", ...props }: InputHTMLAttributes<HTMLInputElement>) { return <input className={`w-full rounded-lg border border-[#d8ded8] bg-white px-3 py-2.5 text-sm text-ink outline-none placeholder:text-[#7b8780] focus:border-moss focus:ring-2 focus:ring-moss/15 ${className}`} {...props} />; }
+export function Card({ children, className = "" }: { children: ReactNode; className?: string }) { return <section className={`rounded-2xl border border-[#e5e8e3] bg-white shadow-panel ${className}`}>{children}</section>; }
+export function Badge({ value }: { value: string }) { const color = value === "ACTIVE" ? "bg-emerald-50 text-emerald-700" : value === "COMPLETED" ? "bg-blue-50 text-blue-700" : value === "ON_HOLD" ? "bg-amber-50 text-amber-700" : "bg-stone-100 text-stone-700"; return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${color}`}>{value.replace("_", " ")}</span>; }

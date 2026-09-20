@@ -1,0 +1,65 @@
+BuildTrack — Full Tree Overview
+Generated 2026-09-20. Backend/frontend core migrated to Next.js + multi-tenant Django.
+Ports: backend Django :8000 (gunicorn prod) | frontend Next.js :3000 (Vite legacy :5173) | postgres :5432 | redis :6379 (optional)
+
+BuildTrack/
+├── README.md                      # vision, stack, structure, quickstart, roadmap
+├── PROJECT_STRUCTURE.txt          # this file
+├── .gitignore                     # python, django, node, vite, env, IDE
+├── docker-compose.yml             # db + redis + backend (gunicorn+healthcheck) + frontend (Next :3000)
+│
+├── backend/                       # Django REST API (11 active apps)
+│   ├── Dockerfile                 # python:3.12-slim, gunicorn 0.0.0.0:8000, non-root appuser
+│   ├── requirements.txt           # django, drf, simplejwt, corsheaders, psycopg2-binary, gunicorn, whitenoise
+│   ├── manage.py
+│   ├── .env / .env.example        # DJANGO_SECRET_KEY, DJANGO_DEBUG, POSTGRES_*, CORS_ALLOWED_ORIGINS, DATABASE_URL
+│   ├── config/                    # project settings
+│   │   ├── settings.py            # DRF+SimpleJWT+throttling, DATABASE_URL support, CORS 3000+5173
+│   │   ├── urls.py                # /admin/, /api/v1/auth|companies|projects|budgets|expenses|inventory|workforce|reports|dashboard|audit-logs
+│   │   ├── wsgi.py
+│   │   └── asgi.py
+│   └── apps/
+│       ├── accounts/              # Auth (email login, HttpOnly refresh, JWT Bearer)
+│       ├── companies/             # Multi-tenant Company + Membership + Invitations
+│       ├── projects/              # Project tracking (DRAFT/ACTIVE/ON_HOLD/COMPLETED/ARCHIVED)
+│       ├── budgets/               # Budget + BudgetVersion + BudgetCategory
+│       ├── expenses/              # Expense + Supplier + approvals + attachments
+│       ├── inventory/             # Material, InventoryLocation, Balance, Transactions, Transfers
+│       ├── workforce/             # Workers & assignments
+│       ├── reports/               # DailyReport + Revisions + MaterialUsage
+│       ├── audit/                 # Immutable AuditLog
+│       ├── dashboard/             # Company & project dashboards
+│       ├── common/                # UUIDTimeStampedModel, tenant helpers
+│       └── clients|quotes|contact # LEGACY (orphaned, not in INSTALLED_APPS, kept for reference)
+│
+├── frontend/                      # Next.js 15 App Router (primary) + Vite legacy (secondary)
+│   ├── Dockerfile                 # node:22-alpine, Next dev :3000 (no build in dev)
+│   ├── package.json / next.config.ts / vite.config.js / index.html
+│   ├── .env.example               # NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+│   ├── app/                       # Next.js App Router (dashboard, projects, inventory, expenses, etc.)
+│   ├── components/                # Next.js UI (shell, auth-provider, ui.tsx)
+│   ├── lib/                       # api.ts (Bearer + X-Company-ID + auto-refresh, credentials:include)
+│   ├── public/                    # static assets
+│   └── src/                       # Legacy Vite SPA (kept, fixed imports)
+│       ├── main.jsx / App.jsx     # imports -> legacy-vite-pages/
+│       ├── legacy-vite-pages/     # Home, Projects, ProjectDetail, etc.
+│       ├── api/                   # axios client (Bearer + X-Company-ID)
+│       ├── context/               # AuthContext (legacy)
+│       ├── components/            # Navbar, Cards, Forms
+│       ├── hooks/ / utils/ / data/ / assets/ / styles/
+│
+├── docs/                          # Updated 2026-09-20
+│   ├── ARCHITECTURE.md            # monorepo diagram, CORS 3000+5173, JWT HttpOnly flow, deploy Render/Vercel
+│   └── ROADMAP.md                 # MVP -> Phase 2 (auth, dashboard, payments, tracking)
+│
+├── postman/                       # API collection (legacy /api paths - needs regeneration to /api/v1)
+│
+└── scripts/                       # Updated for Next.js :3000 + NEXT_PUBLIC_API_URL
+    ├── setup.bat / setup.sh       # first-time backend+frontend install + migrate
+    └── run_dev.bat / run_dev.sh   # start Django :8000 + Next.js :3000
+
+Integration notes:
+- Frontend -> Backend: NEXT_PUBLIC_API_URL (http://localhost:8000/api/v1) + Authorization: Bearer <access> + X-Company-ID header + credentials:include (HttpOnly refresh at /api/v1/auth/refresh/)
+- CORS: backend allows http://localhost:3000, http://localhost:5173, http://127.0.0.1:3000 (dev), Vercel URL (prod via env)
+- Auth: /api/v1/auth/register|login|refresh|logout|me -> SimpleJWT (15m access, 7d refresh rotation+blacklist)
+- Compose health: db pg_isready + backend healthcheck + frontend depends_on backend healthy; redis optional.

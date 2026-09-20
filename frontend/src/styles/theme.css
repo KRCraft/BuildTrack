@@ -1,0 +1,92 @@
+/* BuildTrack theme tokens — import first in globals.css */
+:root {
+  --bt-orange: #f26a1b;
+  --bt-orange-dark: #c94f0a;
+  --bt-orange-light: #fff0e3;
+  --bt-slate-900: #1a2430;
+  --bt-slate-800: #243041;
+  --bt-slate-700: #344054;
+  --bt-slate-500: #667085;
+  --bt-slate-200: #eaecf0;
+  --bt-slate-100: #f2f4f7;
+  --bt-white: #ffffff;
+  --bt-success: #12805c;
+  --bt-radius: 12px;
+  --bt-radius-sm: 8px;
+  --bt-shadow: 0 4px 16px rgba(26, 36, 48, 0.08);
+  --bt-shadow-lg: 0 12px 32px rgba(26, 36, 48, 0.14);
+  --bt-font-heading: "Archivo", "Inter", system-ui, sans-serif;
+  --bt-font-body: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+.bt-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: var(--bt-orange);
+  color: #1a2430;
+  font-weight: 700;
+  padding: 0.875rem 1.75rem;
+  border-radius: var(--bt-radius-sm);
+  border: none;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.bt-btn-primary:hover {
+  background: #ff7d31;
+  transform: translateY(-1px);
+}
+
+.bt-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: transparent;
+  color: var(--bt-white);
+  font-weight: 600;
+  padding: 0.875rem 1.75rem;
+  border-radius: var(--bt-radius-sm);
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.bt-btn-dark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bt-slate-900);
+  color: var(--bt-white);
+  font-weight: 600;
+  padding: 0.75rem 1.5rem;
+  border-radius: var(--bt-radius-sm);
+  border: none;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.bt-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--bt-orange-light);
+  color: var(--bt-orange-dark);
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.bt-card {
+  background: var(--bt-white);
+  border: 1px solid var(--bt-slate-200);
+  border-radius: var(--bt-radius);
+  box-shadow: var(--bt-shadow);
+  overflow: hidden;
+}
