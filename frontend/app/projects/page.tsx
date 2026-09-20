@@ -4,7 +4,60 @@ import { useEffect, useState } from "react";
 import { Search } from "lucide-react";
 import { Shell } from "@/components/shell";
 import { api, Project } from "@/lib/api";
-import { Badge, Card, Input } from "@/components/ui";
+import { Badge, Card, Input, Select, PageHeader, Button, Skeleton, EmptyState, Alert } from "@/components/ui";
 import { useAuth } from "@/components/auth-provider";
 
-export default function ProjectsPage() { const { loading, companies } = useAuth(); const [projects,setProjects]=useState<Project[]>([]),[search,setSearch]=useState(""),[status,setStatus]=useState(""),[error,setError]=useState(""); useEffect(()=>{ if(!loading && companies.length) { const query=new URLSearchParams(); if(search) query.set("search",search); if(status)query.set("status",status); api<Project[]>(`/projects/?${query}`,{},true).then(setProjects).catch(e=>setError(e.message)); } },[loading,companies.length,search,status]); return <Shell><div className="mb-7 flex items-end justify-between"><div><p className="text-sm font-semibold text-moss">Delivery</p><h1 className="mt-1 text-3xl font-bold">Projects</h1><p className="mt-2 text-[#65716a]">Keep every active build visible and accountable.</p></div><Link href="/projects/new" className="rounded-lg bg-moss px-4 py-2.5 text-sm font-semibold text-white">New project</Link></div><Card><div className="flex flex-col gap-3 border-b border-[#edf0eb] p-4 sm:flex-row"><div className="relative flex-1"><Search className="absolute left-3 top-3 text-[#87928b]" size={17}/><Input value={search} onChange={e=>setSearch(e.target.value)} className="pl-9" placeholder="Search by project, code, or client"/></div><select value={status} onChange={e=>setStatus(e.target.value)} className="rounded-lg border border-[#d8ded8] bg-white px-3 py-2 text-sm"><option value="">All statuses</option><option value="DRAFT">Draft</option><option value="ACTIVE">Active</option><option value="ON_HOLD">On hold</option><option value="COMPLETED">Completed</option><option value="ARCHIVED">Archived</option></select></div>{error ? <p className="p-5 text-red-700">{error}</p> : <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-[#fafbf9] text-xs uppercase tracking-wide text-[#7b8780]"><tr><th className="px-5 py-3 font-semibold">Project</th><th className="px-5 py-3 font-semibold">Client</th><th className="px-5 py-3 font-semibold">Timeline</th><th className="px-5 py-3 font-semibold">Progress</th><th className="px-5 py-3 font-semibold">Status</th></tr></thead><tbody className="divide-y divide-[#edf0eb]">{projects.map(p=><tr key={p.id} className="hover:bg-[#fafbf9]"><td className="px-5 py-4"><Link className="font-semibold hover:text-moss" href={`/projects/${p.id}`}>{p.name}<span className="mt-1 block text-xs font-normal text-[#7b8780]">{p.code}</span></Link></td><td className="px-5 py-4 text-[#65716a]">{p.client_name || "—"}</td><td className="px-5 py-4 text-[#65716a]">{p.planned_start_date || "—"} <span className="text-[#a0aaa3]">→</span> {p.planned_end_date || "—"}</td><td className="px-5 py-4"><div className="flex items-center gap-2"><div className="h-2 w-20 overflow-hidden rounded-full bg-[#e8ede8]"><div className="h-full bg-moss" style={{width:`${p.progress_percent_cache}%`}}/></div>{p.progress_percent_cache}%</div></td><td className="px-5 py-4"><Badge value={p.status}/></td></tr>)}{!projects.length && <tr><td colSpan={5} className="p-10 text-center text-[#718078]">No projects match this view.</td></tr>}</tbody></table></div>}</Card></Shell>; }
+export default function ProjectsPage() {
+  const { loading, companies } = useAuth();
+  const [projects,setProjects]=useState<Project[]>([]);
+  const [search,setSearch]=useState("");
+  const [status,setStatus]=useState("");
+  const [error,setError]=useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  useEffect(()=>{ if(!loading && companies.length) {
+    setIsLoading(true);
+    const query=new URLSearchParams();
+    if(search) query.set("search",search);
+    if(status) query.set("status",status);
+    // Handle both paginated {results:[]} and bare array
+    api<any>(`/projects/?${query}`,{},true).then(res=>{
+      const list = Array.isArray(res) ? res : (res.results || res);
+      setProjects(Array.isArray(list) ? list : []);
+    }).catch(e=>setError(e.message)).finally(()=>setIsLoading(false));
+  }},[loading,companies.length,search,status]);
+
+  return <Shell>
+    <PageHeader eyebrow="Delivery" title="Projects" description="Keep every active build visible and accountable — card view on mobile, table on desktop." action={<Link href="/projects/new"><Button>New project</Button></Link>} />
+    <Card>
+      <div className="flex flex-col gap-3 border-b border-[#edf0eb] p-4 sm:flex-row">
+        <div className="relative flex-1"><Search className="absolute left-3 top-3 text-[#87928b]" size={17} aria-hidden/><Input value={search} onChange={e=>setSearch(e.target.value)} className="pl-9" placeholder="Search by project, code, or client" aria-label="Search projects" /></div>
+        <Select value={status} onChange={e=>setStatus(e.target.value)} className="sm:w-48" aria-label="Filter by status"><option value="">All statuses</option><option value="DRAFT">Draft</option><option value="ACTIVE">Active</option><option value="ON_HOLD">On hold</option><option value="COMPLETED">Completed</option><option value="ARCHIVED">Archived</option></Select>
+      </div>
+      {error ? <div className="p-4"><Alert variant="error">{error}</Alert></div> : isLoading ? <div className="p-4 space-y-3">{[1,2,3].map(i=><Skeleton key={i} className="h-16" />)}</div> : (
+        <>
+          {/* Mobile cards */}
+          <div className="grid gap-3 p-4 sm:hidden">
+            {projects.length===0 ? <EmptyState title="No projects" description="Try adjusting filters or create a new project." /> : projects.map(p=>(
+              <Link key={p.id} href={`/projects/${p.id}`} className="rounded-xl border border-[#e5e8e3] p-4 hover:bg-[#fafbf9] transition">
+                <div className="flex items-start justify-between gap-2"><p className="font-semibold line-clamp-1">{p.name}</p><Badge value={p.status} /></div>
+                <p className="mt-1 text-sm text-[#65716a]">{p.code} · {p.client_name}</p>
+                <p className="mt-1 text-xs text-[#78847d]">{p.location || "No location"}</p>
+              </Link>
+            ))}
+          </div>
+          {/* Desktop table */}
+          <div className="hidden overflow-x-auto sm:block">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="bg-[#fafbf9] text-xs uppercase tracking-wide text-[#7b8780]"><tr><th className="px-5 py-3 font-semibold">Project</th><th className="px-5 py-3 font-semibold">Client</th><th className="px-5 py-3 font-semibold">Status</th><th className="px-5 py-3 font-semibold">Progress</th></tr></thead>
+              <tbody className="divide-y divide-[#f0f2ee]">
+                {projects.length===0 ? <tr><td colSpan={4} className="p-8 text-center text-[#65716a]">No projects match your filters.</td></tr> : projects.map(p=>(
+                  <tr key={p.id} className="hover:bg-[#fafbf9] transition"><td className="px-5 py-4"><Link href={`/projects/${p.id}`} className="font-medium hover:text-moss hover:underline">{p.name}</Link><p className="text-xs text-[#78847d]">{p.code}</p></td><td className="px-5 py-4 text-[#65716a]">{p.client_name}</td><td className="px-5 py-4"><Badge value={p.status} /></td><td className="px-5 py-4 tabular-nums">{p.progress_percent_cache}%</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Card>
+  </Shell>;
+}
