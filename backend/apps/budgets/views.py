@@ -41,12 +41,12 @@ def editable(request, version):
 
 
 class ProjectBudgetView(APIView):
-     def get(self, request, project_id):
-         project = project_or_404(request, project_id)
-         budget = Budget.objects.select_related("active_version").filter(project=project, company=request.company).first()
-         if not budget:
-             raise NotFound("Budget was not found for this project.")
-         return Response(BudgetSerializer(budget).data)
+    def get(self, request, project_id):
+        project = project_or_404(request, project_id)
+        budget = Budget.objects.select_related("active_version").filter(project=project, company=request.company).first()
+        if not budget:
+            raise NotFound("Budget was not found for this project.")
+        return Response(BudgetSerializer(budget).data)
 
     @transaction.atomic
     def post(self, request, project_id):
